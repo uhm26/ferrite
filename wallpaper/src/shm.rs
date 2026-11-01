@@ -1,28 +1,29 @@
 //! Pixel memory the compositor can read: an anonymous file, mapped into us.
 
+use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd};
 
 use crate::sys;
 
 /// `len` bytes of shared memory, mapped read-write. Unmapped on drop; the compositor
 /// keeps its own mapping, so dropping this never changes what is on screen.
 pub struct Pixels {
-    fd: OwnedFd,
+    file: File,
     ptr: *mut u8,
     len: usize,
 }
 
 impl Pixels {
     pub fn new(len: usize) -> io::Result<Self> {
-        let fd = sys::memfd()?;
-        std::fs::File::from(fd.try_clone()?).set_len(len as u64)?;
-        let ptr = sys::map_shared(fd.as_fd(), len)?;
-        Ok(Self { fd, ptr, len })
+        let file = File::from(sys::memfd()?);
+        file.set_len(len as u64)?;
+        let ptr = sys::map_shared(file.as_fd(), len)?;
+        Ok(Self { file, ptr, len })
     }
 
     pub fn fd(&self) -> BorrowedFd<'_> {
-        self.fd.as_fd()
+        self.file.as_fd()
     }
 
     pub fn as_u32_mut(&mut self) -> &mut [u32] {

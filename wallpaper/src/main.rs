@@ -27,7 +27,7 @@ fn main() -> ExitCode {
             Ok(Err(why)) => fail(why),
             Err(e) => fail(format!("talking to the running wall: {e}")),
         },
-        Ok(ipc::Role::Daemon(l)) => match app::run(PathBuf::from(&image), &l) {
+        Ok(ipc::Role::Daemon(l)) => match app::run(image, &l) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 ipc::remove_socket();
