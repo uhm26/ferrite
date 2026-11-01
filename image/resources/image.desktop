@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=image
+GenericName=Image Viewer
+Comment=View PNG and JPEG images
+Exec=image %f
+Icon=image
+Terminal=false
+NoDisplay=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;
+Keywords=picture;photo;viewer;png;jpg;
+StartupWMClass=image
