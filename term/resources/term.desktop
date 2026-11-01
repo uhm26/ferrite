@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=term
+GenericName=Terminal
+Comment=Small, fast terminal
+Exec=term
+Icon=term
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=shell;prompt;command;terminal;
+StartupWMClass=term
