@@ -1,0 +1,20 @@
+[package]
+name = "wall"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# PNG decoding: codec, not worth writing ourselves; zune shares zune-core with jpeg (4 crates).
+zune-png = { version = "0.5.2", default-features = false, features = ["std", "sse"] }
+# JPEG decoding: SIMD codec, same family (adds 1 crate).
+zune-jpeg = { version = "0.5.15", default-features = false, features = ["std", "x86"] }
+# ZCursor: the byte reader both decoders take (already in the tree via both).
+zune-core = { version = "0.5.3", default-features = false, features = ["std"] }
+
+[lints.clippy]
+too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
