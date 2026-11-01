@@ -34,6 +34,7 @@ pub enum Icon {
     Close,
     Plus,
     Minus,
+    Trash,
 }
 
 /// One stroke, in grid units.
@@ -148,9 +149,16 @@ const PLUS: &[Shape] = &[
     Line(&[(5.0, 12.0), (19.0, 12.0)]),
 ];
 const MINUS: &[Shape] = &[Line(&[(5.0, 12.0), (19.0, 12.0)])];
+const TRASH: &[Shape] = &[
+    Line(&[(4.0, 6.5), (20.0, 6.5)]),
+    Line(&[(9.5, 6.5), (9.5, 3.5), (14.5, 3.5), (14.5, 6.5)]),
+    Line(&[(6.0, 6.5), (7.0, 20.5), (17.0, 20.5), (18.0, 6.5)]),
+    Line(&[(10.0, 10.5), (10.0, 16.5)]),
+    Line(&[(14.0, 10.5), (14.0, 16.5)]),
+];
 
 impl Icon {
-    pub const ALL: [Icon; 23] = [
+    pub const ALL: [Icon; 24] = [
         Icon::Folder,
         Icon::FolderFill,
         Icon::File,
@@ -174,6 +182,7 @@ impl Icon {
         Icon::Close,
         Icon::Plus,
         Icon::Minus,
+        Icon::Trash,
     ];
 
     fn shapes(self) -> &'static [Shape] {
@@ -201,6 +210,7 @@ impl Icon {
             Icon::Close => CLOSE,
             Icon::Plus => PLUS,
             Icon::Minus => MINUS,
+            Icon::Trash => TRASH,
         }
     }
 

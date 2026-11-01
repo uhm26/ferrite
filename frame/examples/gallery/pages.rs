@@ -4,7 +4,7 @@
 use frame::ui::motion::Tween;
 use frame::ui::text::{BOLD, MEDIUM, REGULAR, SEMIBOLD};
 use frame::ui::theme::*;
-use frame::ui::{Align, Icon, Ink, Rect, Ui};
+use frame::ui::{Align, Icon, Ink, MenuEvent, MenuItem, Rect, Ui};
 
 use crate::debug::Stats;
 use crate::layout::{self, Flow, PAGES, ROW};
@@ -45,6 +45,9 @@ pub struct Gallery {
     moved: bool,
     drawer_open: bool,
     drawer: Tween,
+    /// The demo menu: where it is open and its highlighted item.
+    menu: Option<(f32, f32)>,
+    menu_hot: Option<usize>,
 }
 
 impl Gallery {
@@ -63,6 +66,8 @@ impl Gallery {
             moved: false,
             drawer_open: false,
             drawer: Tween::new(0.0, DRAWER, DRAWER_CURVE),
+            menu: None,
+            menu_hot: None,
         }
     }
 
@@ -115,6 +120,7 @@ impl Gallery {
             over,
         );
         self.drawer(ui, (nav_w, w), h);
+        self.menu(ui);
         if self.debug {
             stats.draw(ui, w);
         }
@@ -206,10 +212,15 @@ impl Gallery {
         }
         (ui.s.glass, ui.s.reduced) = (glass, reduced);
 
-        let rows = f.group(ui, "Text", (1, ROW));
+        let rows = f.group(ui, "Text and menus", (2, ROW));
         let hint = format!("{} chars; Esc or Return lets go", self.name.chars().count());
         let c = layout::setting(ui, rows[0], ("Name", &hint), 240.0);
         ui.field("field/name", c, &mut self.name, "Type here…");
+        let c = layout::setting(ui, rows[1], ("Menu", "Grows from where it opens"), 96.0);
+        if ui.button("btn/menu", c, "Open", false) {
+            ui.forget("demo-menu/grow");
+            (self.menu, self.menu_hot) = (Some((c.x, c.y + c.h + S4)), None);
+        }
     }
 
     fn lists(&mut self, ui: &mut Ui, f: &mut Flow) {
@@ -460,5 +471,30 @@ fn icons_page(ui: &mut Ui, f: &mut Flow) {
             small,
             Align::Center,
         );
+    }
+}
+
+impl Gallery {
+    /// The demo menu, drawn last so it sits on top.
+    fn menu(&mut self, ui: &mut Ui) {
+        let Some(at) = self.menu else {
+            return;
+        };
+        let items = [
+            MenuItem::new("Open", "Return", true),
+            MenuItem::SEPARATOR,
+            MenuItem::new("Copy", "Ctrl+C", true),
+            MenuItem::new("Paste", "Ctrl+V", false),
+            MenuItem::SEPARATOR,
+            MenuItem::new("Rename…", "F2", true),
+        ];
+        match ui.menu("demo-menu", at, &items, &mut self.menu_hot) {
+            MenuEvent::Open => {}
+            MenuEvent::Picked(_) => {
+                self.clicks += 1;
+                self.menu = None;
+            }
+            MenuEvent::Closed => self.menu = None,
+        }
     }
 }

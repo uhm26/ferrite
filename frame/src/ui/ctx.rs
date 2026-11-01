@@ -126,12 +126,18 @@ pub struct Ui<'a> {
 impl Ui<'_> {
     /// The value of spring `name` heading for `target`, advanced once per frame.
     pub fn spring(&mut self, name: &str, target: f32, duration: f32) -> f32 {
+        self.spring_from(name, target, target, duration)
+    }
+
+    /// [`Ui::spring`], but a spring that doesn't exist yet starts at `from` (so a
+    /// surface can grow in instead of popping in). [`Ui::forget`] restarts it.
+    pub fn spring_from(&mut self, name: &str, from: f32, target: f32, duration: f32) -> f32 {
         let (frame, dt, reduced) = (self.s.frame, self.s.dt, self.s.reduced);
         let (sp, last) = self
             .s
             .springs
             .entry(id(name))
-            .or_insert((Spring::new(target, duration), frame));
+            .or_insert((Spring::new(from, duration), frame));
         sp.set(target);
         if reduced {
             sp.finish();
@@ -142,6 +148,11 @@ impl Ui<'_> {
         }
         self.s.moving |= sp.moving();
         sp.value
+    }
+
+    /// Drop spring `name`: next use starts fresh.
+    pub fn forget(&mut self, name: &str) {
+        self.s.springs.remove(&id(name));
     }
 
     /// Advance an app-owned tween toward `to` by this frame's dt.
@@ -190,7 +201,7 @@ impl Ui<'_> {
         // A fresh focus starts its caret and selection where they are, no slide from
         // wherever the last edit left them (field.rs springs).
         for part in ["off", "a", "b", "c"] {
-            self.s.springs.remove(&id(&format!("{name}/{part}")));
+            self.forget(&format!("{name}/{part}"));
         }
     }
 
@@ -205,6 +216,17 @@ impl Ui<'_> {
     pub fn take_focus_all(&mut self, name: &str) {
         self.take_focus(name);
         self.s.edit = Edit::ALL;
+    }
+
+    /// `name` takes the keyboard with bytes `start..end` of its text selected (rename
+    /// selects a file's name without its extension).
+    pub fn take_focus_range(&mut self, name: &str, start: usize, end: usize) {
+        self.take_focus(name);
+        self.s.edit = Edit {
+            caret: end,
+            anchor: start,
+            off: 0.0,
+        };
     }
 
     /// Return was pressed in field `name` this frame (the field already let go).
