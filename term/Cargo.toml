@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# None on purpose. System C libs via our own bindings: freetype, fontconfig,
+# xkbcommon (see src/font/, src/xkb.rs).
 
 [lints.clippy]
 too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
