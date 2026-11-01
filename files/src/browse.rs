@@ -1,16 +1,21 @@
 //! Where we are: the current folder, its entries, the selected one, back/forward
 //! history, and moving between folders. No drawing here.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::dir::{self, Entry};
+use crate::dir::{self, Entry, SortBy};
 use crate::sys;
 
 pub struct Browser {
     pub cwd: PathBuf,
+    /// What the list shows: `all` through the filter.
     pub entries: Vec<Entry>,
+    /// Every entry of the folder, sorted.
+    all: Vec<Entry>,
+    /// Show only names containing this (Ctrl+F); cleared on another folder.
+    pub filter: String,
     pub sel: usize,
     /// Free and total bytes on the current folder's filesystem, if known.
     pub disk: Option<(u64, u64)>,
@@ -20,6 +25,8 @@ pub struct Browser {
     pub hidden: bool,
     /// Bumped on every successful load: views cache per-folder measurements by it.
     pub generation: u64,
+    /// Column the entries are ordered by, and whether descending (folders first always).
+    pub sort: (SortBy, bool),
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
 }
@@ -30,11 +37,14 @@ impl Browser {
         let mut b = Browser {
             cwd: PathBuf::new(),
             entries: Vec::new(),
+            all: Vec::new(),
+            filter: String::new(),
             sel: 0,
             disk: None,
             error: None,
             hidden: false,
             generation: 0,
+            sort: (SortBy::Name, false),
             back: Vec::new(),
             forward: Vec::new(),
         };
@@ -49,15 +59,17 @@ impl Browser {
     }
 
     /// Show folder `path`, selecting the entry named `select` if it is there. On
-    /// failure stay put.
+    /// failure stay put. Another folder drops the filter.
     fn load(&mut self, path: PathBuf, select: Option<&OsStr>) -> bool {
         match dir::list(&path, self.hidden) {
-            Ok(entries) => {
-                self.sel = select
-                    .and_then(|s| entries.iter().position(|e| e.os == s))
-                    .unwrap_or(0);
+            Ok(mut entries) => {
+                dir::sort(&mut entries, self.sort.0, self.sort.1);
+                if path != self.cwd {
+                    self.filter.clear();
+                }
                 self.disk = sys::disk(&path).ok();
-                (self.cwd, self.entries, self.error) = (path, entries, None);
+                (self.cwd, self.all, self.error) = (path, entries, None);
+                self.show(select.map(OsStr::to_os_string));
                 self.generation += 1;
                 true
             }
@@ -66,6 +78,44 @@ impl Browser {
                 false
             }
         }
+    }
+
+    /// Fill `entries` from `all` through the filter, selecting `keep` if shown.
+    fn show(&mut self, keep: Option<OsString>) {
+        let f = self.filter.to_lowercase();
+        self.entries = self
+            .all
+            .iter()
+            .filter(|e| f.is_empty() || e.name.to_lowercase().contains(&f))
+            .cloned()
+            .collect();
+        self.sel = keep
+            .and_then(|k| self.entries.iter().position(|e| e.os == k))
+            .unwrap_or(0);
+    }
+
+    fn selected_name(&self) -> Option<OsString> {
+        self.entries.get(self.sel).map(|e| e.os.clone())
+    }
+
+    /// Order by `by`; the same column again flips the direction. The selected entry
+    /// stays selected.
+    pub fn sort_by(&mut self, by: SortBy) {
+        self.sort = (by, self.sort.0 == by && !self.sort.1);
+        dir::sort(&mut self.all, self.sort.0, self.sort.1);
+        self.show(self.selected_name());
+    }
+
+    /// Show only entries whose name contains `text` (any case); empty shows all.
+    pub fn set_filter(&mut self, text: &str) {
+        self.filter = text.to_string();
+        self.show(self.selected_name());
+        self.generation += 1;
+    }
+
+    /// Read the folder again and select `name` (after a rename or new folder).
+    pub fn reload_select(&mut self, name: &OsStr) {
+        self.load(self.cwd.clone(), Some(name));
     }
 
     /// Show or hide dotfiles, keeping the selected entry selected.

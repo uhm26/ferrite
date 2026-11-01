@@ -4,9 +4,13 @@
 //! [`app`] runs the window loop.
 
 mod app;
+mod bookmarks;
 mod browse;
 mod dir;
+mod ops;
 mod sys;
+mod trash;
+mod uri;
 mod view;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

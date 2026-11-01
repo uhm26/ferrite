@@ -15,6 +15,8 @@ const NAME: &str = "location";
 #[derive(Default)]
 pub struct Location {
     pub open: bool,
+    /// Filtering this folder (Ctrl+F) instead of editing the path.
+    pub filter: bool,
     text: String,
     /// Ctrl+V: the app should read the clipboard and hand it to [`Location::paste`].
     pub paste_wanted: bool,
@@ -28,7 +30,7 @@ impl Location {
     /// Open the bar: the current path, all selected (`with` None), or starting with
     /// `with` (a typed `/` or `~`).
     pub fn start(&mut self, ui: &mut Ui, b: &Browser, with: Option<&str>) {
-        self.open = true;
+        (self.open, self.filter) = (true, false);
         match with {
             None => {
                 self.text = b.cwd.display().to_string();
@@ -41,6 +43,13 @@ impl Location {
         }
     }
 
+    /// Open the bar as a live filter for the folder shown (its text selected).
+    pub fn start_filter(&mut self, ui: &mut Ui, b: &Browser) {
+        (self.open, self.filter) = (true, true);
+        self.text.clone_from(&b.filter);
+        ui.take_focus_all(NAME);
+    }
+
     pub fn paste(&mut self, text: String) {
         self.pasted = Some(text);
     }
@@ -50,11 +59,24 @@ impl Location {
         // An empty clipboard pastes nothing (it must not wipe the selected path).
         if let Some(t) = self.pasted.take().filter(|t| !t.trim().is_empty()) {
             ui.paste_into(&mut self.text, &t);
+            if self.filter {
+                b.set_filter(&self.text);
+            }
         }
-        ui.field(NAME, r, &mut self.text, "Type a path");
+        let hint = if self.filter {
+            "Filter this folder"
+        } else {
+            "Type a path"
+        };
+        let changed = ui.field(NAME, r, &mut self.text, hint);
+        if self.filter && changed {
+            b.set_filter(&self.text);
+        }
         if ui.submitted(NAME) {
             self.open = false;
-            go(b, &resolve(&b.cwd, &self.text));
+            if !self.filter {
+                go(b, &resolve(&b.cwd, &self.text));
+            }
         } else if !ui.focused(NAME) {
             self.open = false;
         }

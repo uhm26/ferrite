@@ -7,11 +7,11 @@
 
 use frame::ui::paint::mix;
 use frame::ui::theme::*;
-use frame::ui::{Align, Rect, Ui};
+use frame::ui::{Align, Icon, Rect, Ui};
 
 use super::scroll::Scroll;
 use crate::browse::Browser;
-use crate::dir::{self, Entry};
+use crate::dir::{self, Entry, SortBy};
 use crate::sys;
 
 const TITLES: [&str; 3] = ["Size", "Type", "Modified"];
@@ -21,6 +21,8 @@ const GAP: f32 = S24;
 const ALL_COLS_W: f32 = 600.0;
 /// Entries measured for column widths (a huge folder costs one bounded pass).
 const MEASURE: usize = 4096;
+/// Sort arrow beside the active column title.
+const ARROW: f32 = 12.0;
 
 /// Where things go in a row.
 struct Cols {
@@ -35,6 +37,11 @@ struct Cols {
 pub struct List {
     /// `Browser::generation` they were measured for, and the widths.
     measured: Option<(u64, [f32; 3])>,
+    /// A column title clicked this frame (the view sorts by it).
+    pub sort_click: Option<SortBy>,
+    /// Last frame's rows area, scroll offset and name column (x, w): for the
+    /// right-click target, the menu key and the rename field.
+    geo: Option<(Rect, f32, f32, f32)>,
 }
 
 impl List {
@@ -48,8 +55,9 @@ impl List {
     ) -> Option<usize> {
         let widths = self.widths(ui, b);
         let c = layout(area, widths);
-        header(ui, Rect { h: ROW_H, ..area }, &c);
+        self.sort_click = header(ui, Rect { h: ROW_H, ..area }, &c, b.sort);
         let rows = Rect::new(area.x, area.y + ROW_H + S4, area.w, area.h - ROW_H - S4);
+        self.geo = None;
         if b.entries.is_empty() {
             super::empty(ui, rows);
             return None;
@@ -58,6 +66,7 @@ impl List {
         let key = format!("scroll/list/{}", b.cwd.display());
         let sel = (b.sel as f32 * ROW_H, ROW_H);
         let off = scroll.offset(ui, &key, sel, (rows.h, content));
+        self.geo = Some((rows, off, c.name_x, c.name_w));
         let first = (off / ROW_H) as usize;
         let last = (((off + rows.h) / ROW_H).ceil() as usize).min(b.entries.len());
         let now = sys::local(unix_now());
@@ -73,6 +82,22 @@ impl List {
         let over = area.contains(ui.s.input.pos);
         ui.scroll_thumb("scroll/list/thumb", rows, (off, rows.h, content), over);
         clicked
+    }
+
+    /// The entry under `pos`, from last frame's layout.
+    pub fn at(&self, pos: (f32, f32), n: usize) -> Option<usize> {
+        let (rows, off, ..) = self.geo?;
+        let i = ((pos.1 - rows.y + off) / ROW_H).floor();
+        (rows.contains(pos) && i >= 0.0 && (i as usize) < n).then_some(i as usize)
+    }
+
+    /// Entry `i`'s row and its name cell, if on screen last frame.
+    pub fn rects(&self, i: usize) -> Option<(Rect, Rect)> {
+        let (rows, off, name_x, name_w) = self.geo?;
+        let row = Rect::new(rows.x, rows.y + i as f32 * ROW_H - off, rows.w, ROW_H);
+        let visible = row.y >= rows.y - 1.0 && row.y + row.h <= rows.y + rows.h + 1.0;
+        let name = Rect::new(name_x - S4, row.y + 2.0, name_w + S4, row.h - 4.0);
+        visible.then_some((row, name))
     }
 
     /// Widest text per value column (titles included), for the folder shown.
@@ -138,20 +163,40 @@ fn align(col: usize) -> Align {
 }
 
 /// Column titles in the heading style over a hairline (space alone can't separate
-/// a header from the first row at this density).
-fn header(ui: &mut Ui, r: Rect, c: &Cols) {
-    let ink = ui.heading();
-    ui.text(
-        Rect::new(c.name_x, r.y, c.name_w, r.h),
-        "Name",
-        ink,
-        Align::Left,
+/// a header from the first row at this density). Each title sorts by its column; the
+/// active one carries an arrow. Returns the column clicked.
+fn header(ui: &mut Ui, r: Rect, c: &Cols, sort: (SortBy, bool)) -> Option<SortBy> {
+    const BY: [SortBy; 4] = [SortBy::Name, SortBy::Size, SortBy::Kind, SortBy::Modified];
+    let cells = std::iter::once((c.name_x, c.name_w, "Name", Align::Left)).chain(
+        c.at.iter()
+            .enumerate()
+            .map(|(k, &(x, w))| (x, w, TITLES[k], align(k))),
     );
-    for (k, &(x, w)) in c.at.iter().enumerate() {
-        ui.text(Rect::new(x, r.y, w, r.h), TITLES[k], ink, align(k));
+    let mut hit = None;
+    for (k, (x, w, title, al)) in cells.enumerate() {
+        let cell = Rect::new(x, r.y, w, r.h);
+        if ui.clicked(&format!("sort/{k}"), cell) {
+            hit = Some(BY[k]);
+        }
+        let on = sort.0 == BY[k];
+        let ink = ui
+            .heading()
+            .color(if on { ui.pal.text } else { ui.pal.sub });
+        ui.text(cell, title, ink, al);
+        if on {
+            let tw = ui.s.text.width(title, ink).ceil();
+            let ax = if al == Align::Right {
+                x + w - tw - S4 - ARROW
+            } else {
+                x + tw + S4
+            };
+            let icon = if sort.1 { Icon::Down } else { Icon::Up };
+            ui.icon(icon, Rect::new(ax, r.y, ARROW, r.h), ARROW, ink.color);
+        }
     }
     let line = ui.pal.line;
     ui.p.rect(Rect::new(r.x, r.y + r.h, r.w, 1.0), 0.0, line);
+    hit
 }
 
 /// One entry: frame's row for hover and selection, then icon, name and columns.

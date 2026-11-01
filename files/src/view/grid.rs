@@ -20,9 +20,37 @@ const NAME_H: f32 = 20.0;
 pub struct Grid {
     /// Tiles per row last frame (↑/↓ move by this many).
     pub cols: usize,
+    /// Last frame's area, scroll offset and tile width (right-click target,
+    /// menu key, rename field).
+    geo: Option<(Rect, f32, f32)>,
 }
 
 impl Grid {
+    /// The entry under `pos`, from last frame's layout.
+    pub fn at(&self, pos: (f32, f32), n: usize) -> Option<usize> {
+        let (inner, off, tile_w) = self.geo?;
+        let col = ((pos.0 - inner.x) / tile_w).floor() as usize;
+        let row = ((pos.1 - inner.y + off) / TILE_H).floor() as usize;
+        let i = row * self.cols + col;
+        (inner.contains(pos) && col < self.cols && i < n).then_some(i)
+    }
+
+    /// Entry `i`'s tile and its name line, if on screen last frame.
+    pub fn rects(&self, i: usize) -> Option<(Rect, Rect)> {
+        let (inner, off, tile_w) = self.geo?;
+        let cols = self.cols.max(1);
+        let (cx, cy) = ((i % cols) as f32, (i / cols) as f32);
+        let t = Rect::new(
+            inner.x + cx * tile_w,
+            inner.y + cy * TILE_H - off,
+            tile_w,
+            TILE_H,
+        );
+        let visible = t.y >= inner.y - 1.0 && t.y + t.h <= inner.y + inner.h + 1.0;
+        let name = Rect::new(t.x + S4, t.y + ICON_BOX, t.w - 2.0 * S4, NAME_H + S8);
+        visible.then_some((t, name))
+    }
+
     /// Draw the grid in `panel`; returns the entry clicked, if any.
     pub fn draw(
         &mut self,
@@ -32,6 +60,7 @@ impl Grid {
         scroll: &mut Scroll,
     ) -> Option<usize> {
         let inner = panel;
+        self.geo = None;
         if b.entries.is_empty() {
             super::empty(ui, inner);
             return None;
@@ -44,6 +73,7 @@ impl Grid {
         let key = format!("scroll/grid/{}", b.cwd.display());
         let sel = ((b.sel / cols) as f32 * TILE_H, TILE_H);
         let off = scroll.offset(ui, &key, sel, (inner.h, content));
+        self.geo = Some((inner, off, tile_w));
         let first = (off / TILE_H) as usize * cols;
         let last = ((((off + inner.h) / TILE_H).ceil() as usize) * cols).min(b.entries.len());
         let mut clicked = None;

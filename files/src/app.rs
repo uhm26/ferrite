@@ -53,7 +53,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         win,
         ui: State::new(Text::new(theme::FAMILY)?),
-        view: View::new(),
+        view: View::new()?,
         // A folder we can't resolve still opens: Browser falls back and shows why.
         browser: Browser::new(std::fs::canonicalize(&start).unwrap_or(start)),
         last: Instant::now(),
@@ -99,6 +99,13 @@ impl App {
             Event::Pointer(Pointer::Button { button, pressed }) if button == pointer::BTN_LEFT => {
                 i.button(pressed);
             }
+            Event::Pointer(Pointer::Button {
+                button,
+                pressed: true,
+            }) if button == pointer::BTN_RIGHT => {
+                let pos = i.pos;
+                self.view.right_click(pos);
+            }
             Event::Pointer(Pointer::Scroll { discrete, px }) => self.view.scroll_by(discrete, px),
             // Mouse side buttons: back / forward, like Nemo.
             Event::Pointer(Pointer::Button {
@@ -137,20 +144,26 @@ impl App {
             fds.push(PollFd::new(f.as_fd(), POLLIN | POLLHUP));
             fds.len() - 1
         });
+        fds.push(PollFd::new(self.view.jobs_fd(), POLLIN));
+        let jobs_at = fds.len() - 1;
         sys::wait(&mut fds, timeout)?;
         let ready = |at: Option<usize>| at.is_some_and(|i| fds[i].ready(POLLIN | POLLHUP));
         let (changed, pasting) = (ready(watch_at), ready(paste_at));
+        let jobs_done = fds[jobs_at].ready(POLLIN);
         drop(fds);
         self.win.dispatch()?;
         self.win.tick(Instant::now());
         let pasted = pasting && self.read_paste();
+        if jobs_done {
+            self.view.job_reports(&mut self.browser);
+        }
         if changed && self.watch.as_mut().is_some_and(Watch::drain) {
             self.browser.reload();
             // Re-arm: if the folder was removed and made again, the old watch is dead.
             self.watching.clear();
             return Ok(true);
         }
-        Ok(pasted)
+        Ok(pasted || jobs_done)
     }
 
     /// Read what the clipboard owner wrote into the paste pipe. At the end (EOF or an
@@ -240,7 +253,8 @@ impl App {
 }
 
 /// Render settled frames into a PNG, no compositor needed, for checking the look:
-/// `files --png out.png [--size WxH] [--grid] [--select N] [--pointer X,Y] [folder]`.
+/// `files --png out.png [--size WxH] [--grid] [--select N] [--pointer X,Y] [--menu] [folder]`
+/// (`--menu` right-clicks at the pointer).
 fn shot(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
     let val = |f: &str| {
@@ -265,10 +279,13 @@ fn shot(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(crate::view::home);
     let mut browser = Browser::new(std::fs::canonicalize(&folder).unwrap_or(folder));
     browser.sel = val("--select").and_then(|s| s.parse().ok()).unwrap_or(0);
-    let mut view = View::new();
+    let mut view = View::new()?;
     view.set_grid(args.contains(&"--grid"));
     let mut ui = State::new(Text::new(theme::FAMILY)?);
     ui.input.pos = pair("--pointer", ',').unwrap_or((-1.0, -1.0));
+    if args.contains(&"--menu") {
+        view.right_click(ui.input.pos);
+    }
     let mut px = vec![0u32; w * h];
     for _ in 0..40 {
         let mut f = ui.begin(Canvas { px: &mut px, w, h }, MAX_DT);

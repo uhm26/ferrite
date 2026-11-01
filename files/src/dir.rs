@@ -9,6 +9,7 @@ use std::{fs, io};
 
 use crate::sys::{self, Local};
 
+#[derive(Clone)]
 pub struct Entry {
     /// For display (lossy if the real name isn't UTF-8).
     pub name: String,
@@ -72,7 +73,7 @@ pub fn list(path: &Path, hidden: bool) -> Result<Vec<Entry>, Error> {
             })
         })
         .collect();
-    out.sort_by_cached_key(|e| (!e.dir, e.name.to_lowercase()));
+    sort(&mut out, SortBy::Name, false);
     Ok(out)
 }
 
@@ -93,6 +94,36 @@ pub fn items(n: usize) -> String {
     } else {
         format!("{n} items")
     }
+}
+
+/// What the list is ordered by (a column).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortBy {
+    #[default]
+    Name,
+    Size,
+    Kind,
+    Modified,
+}
+
+/// Order `entries` by `by` (reversed if `desc`), folders always first. Ties keep name
+/// order (the stable base). Folders compare by how many entries they hold.
+pub fn sort(entries: &mut [Entry], by: SortBy, desc: bool) {
+    use std::cmp::Ordering::Equal;
+    entries.sort_by_cached_key(|e| e.name.to_lowercase());
+    if by == SortBy::Name && desc {
+        entries.reverse();
+    }
+    entries.sort_by(|a, b| {
+        let o = match by {
+            SortBy::Name => Equal,
+            SortBy::Size if a.dir => a.items.cmp(&b.items),
+            SortBy::Size => a.size.cmp(&b.size),
+            SortBy::Kind => kind(a).1.cmp(&kind(b).1),
+            SortBy::Modified => a.modified.cmp(&b.modified),
+        };
+        b.dir.cmp(&a.dir).then(if desc { o.reverse() } else { o })
+    });
 }
 
 /// A short size: `512 B`, `4.2 KB`, `13 MB`.
@@ -222,6 +253,7 @@ mod tests {
     #[test]
     fn dates_shorten_near_now() {
         let at = |year, month, day, hour| Local {
+            sec: 0,
             year,
             month,
             day,
@@ -251,6 +283,31 @@ mod tests {
             kind(&e("x.weird", false)),
             (Kind::Other, "WEIRD file".into())
         );
+    }
+
+    #[test]
+    fn sort_keeps_folders_first_in_every_order() {
+        let e = |name: &str, dir, size, modified| Entry {
+            name: name.into(),
+            os: name.into(),
+            dir,
+            size,
+            items: dir.then_some(size as usize),
+            modified,
+        };
+        let mut v = vec![
+            e("b.txt", false, 5, 1),
+            e("a.txt", false, 9, 3),
+            e("z", true, 1, 2),
+            e("y", true, 4, 0),
+        ];
+        let names = |v: &[Entry]| v.iter().map(|e| e.name.clone()).collect::<Vec<_>>();
+        sort(&mut v, SortBy::Name, true);
+        assert_eq!(names(&v), ["z", "y", "b.txt", "a.txt"]);
+        sort(&mut v, SortBy::Size, true);
+        assert_eq!(names(&v), ["y", "z", "a.txt", "b.txt"]);
+        sort(&mut v, SortBy::Modified, false);
+        assert_eq!(names(&v), ["y", "z", "b.txt", "a.txt"]);
     }
 
     #[test]

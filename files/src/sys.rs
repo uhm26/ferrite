@@ -68,6 +68,7 @@ pub struct Local {
     pub day: u8,
     pub hour: u8,
     pub min: u8,
+    pub sec: u8,
 }
 
 /// Unix seconds → local time (honors TZ and /etc/localtime).
@@ -93,6 +94,7 @@ pub fn local(secs: i64) -> Local {
         day: tm.tm_mday as u8,
         hour: tm.tm_hour as u8,
         min: tm.tm_min as u8,
+        sec: tm.tm_sec as u8,
     }
 }
 

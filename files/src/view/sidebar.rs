@@ -9,7 +9,7 @@ use frame::ui::theme::*;
 use frame::ui::{Align, Icon, Rect, Ui};
 
 use crate::browse::Browser;
-use crate::dir;
+use crate::{bookmarks, dir, trash};
 
 /// Folders under home Nemo lists, if they exist.
 /// shortcut: English names; read ~/.config/user-dirs.dirs for renamed/localized ones.
@@ -50,10 +50,14 @@ struct Place {
     name: String,
     icon: Icon,
     path: PathBuf,
+    /// Index into `HEADINGS`: places, bookmarks or devices.
+    section: usize,
 }
 
+const HEADINGS: [&str; 3] = ["Places", "Bookmarks", "Devices"];
+
 pub struct Places {
-    /// Home and its folders, then the file system (the last entry).
+    /// Places, then bookmarks, then devices.
     list: Vec<Place>,
     /// Open width; the owner drags the edge to change it.
     width: f32,
@@ -64,48 +68,60 @@ pub struct Places {
 }
 
 impl Places {
-    /// Looked up once at start.
     pub fn new() -> Self {
-        let home = home();
-        let mut list = vec![Place {
-            name: "Home".into(),
-            icon: Icon::Home,
-            path: home.clone(),
-        }];
-        for (name, icon) in XDG {
-            let path = home.join(name);
-            if path.is_dir() {
-                list.push(Place {
-                    name: name.into(),
-                    icon,
-                    path,
-                });
-            }
-        }
-        list.push(Place {
-            name: "File System".into(),
-            icon: Icon::Drive,
-            path: PathBuf::from("/"),
-        });
-        Places {
-            list,
+        let mut p = Places {
+            list: Vec::new(),
             width: OPEN_W,
             dragging: false,
             on_edge: false,
-        }
+        };
+        p.refresh();
+        p
     }
 
-    /// Entry rects for a column `w` wide, and the headings (y, text): "Places" over
-    /// home and its folders, "Devices" over the file system (the last entry).
-    fn layout(&self, w: f32) -> (Vec<Rect>, [(f32, &'static str); 2]) {
-        let mut heads = [(S16, "Places"), (0.0, "Devices")];
-        let mut y = S16 + HEADING_H;
-        let last = self.list.len() - 1;
-        let rects = (0..self.list.len())
-            .map(|i| {
-                if i == last {
-                    heads[1].0 = y + S12;
-                    y += S12 + HEADING_H;
+    /// Look the places up again (a bookmark changed, the trash appeared).
+    pub fn refresh(&mut self) {
+        let home = home();
+        let place = |name: &str, icon, path, section| Place {
+            name: name.into(),
+            icon,
+            path,
+            section,
+        };
+        let mut list = vec![place("Home", Icon::Home, home.clone(), 0)];
+        for (name, icon) in XDG {
+            let path = home.join(name);
+            if path.is_dir() {
+                list.push(place(name, icon, path, 0));
+            }
+        }
+        let trash = trash::files_dir();
+        if trash.is_dir() {
+            list.push(place("Trash", Icon::Trash, trash, 0));
+        }
+        for (name, path) in bookmarks::load() {
+            list.push(place(&name, Icon::Folder, path, 1));
+        }
+        list.push(place("File System", Icon::Drive, PathBuf::from("/"), 2));
+        self.list = list;
+    }
+
+    /// Entry rects for a column `w` wide, and a heading (y, text) above each section.
+    fn layout(&self, w: f32) -> (Vec<Rect>, Vec<(f32, &'static str)>) {
+        let mut heads = Vec::new();
+        let mut y = S16;
+        let mut section = usize::MAX;
+        let rects = self
+            .list
+            .iter()
+            .map(|p| {
+                if p.section != section {
+                    if section != usize::MAX {
+                        y += S12; // gap between groups ≥ 1.5× the gap inside one
+                    }
+                    section = p.section;
+                    heads.push((y, HEADINGS[section]));
+                    y += HEADING_H;
                 }
                 let r = Rect::new(S8, y, w - 2.0 * S8, CONTROL_H);
                 y += CONTROL_H + 2.0;

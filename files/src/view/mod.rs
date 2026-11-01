@@ -1,16 +1,21 @@
 //! The window's content: Nemo's layout in frame's flat look. Places run down the
 //! left (folding to icons in narrow windows); the toolbar has back, forward, up,
-//! the path and the view switch; under it the folder's name, then its entries as a
-//! list or a grid on one panel. Keys go to the [`Browser`] here; each part handles
-//! its own clicks.
+//! the path (or a filter) and the view switch; the entries sit in a rounded pane as
+//! a list or a grid; a status bar closes the frame. Right-click opens a menu of
+//! actions (actions.rs); keys are in keys.rs.
 
+mod actions;
 mod grid;
+mod keys;
 mod list;
 mod location;
 mod scroll;
 mod sidebar;
 mod toolbar;
 
+use std::ffi::OsString;
+use std::io;
+use std::os::fd::BorrowedFd;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -21,6 +26,8 @@ use frame::ui::{Align, Icon, Ink, Rect, Ui};
 
 use crate::browse::Browser;
 use crate::dir::{self, Entry, Kind};
+use crate::ops::Jobs;
+use actions::{Clip, Menu, Rename};
 use grid::Grid;
 use list::List;
 use location::Location;
@@ -28,19 +35,6 @@ use scroll::Scroll;
 use sidebar::Places;
 
 pub use sidebar::home;
-
-/// xkbcommon keysyms (xkbcommon-keysyms.h).
-const KEY_BACKSPACE: u32 = 0xff08;
-const KEY_RETURN: u32 = 0xff0d;
-const KEY_ESCAPE: u32 = 0xff1b;
-const KEY_HOME: u32 = 0xff50;
-const KEY_LEFT: u32 = 0xff51;
-const KEY_UP: u32 = 0xff52;
-const KEY_RIGHT: u32 = 0xff53;
-const KEY_DOWN: u32 = 0xff54;
-const KEY_PAGE_UP: u32 = 0xff55;
-const KEY_PAGE_DOWN: u32 = 0xff56;
-const KEY_END: u32 = 0xff57;
 
 /// GTK's default double-click time.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -63,11 +57,26 @@ pub struct View {
     page: usize,
     /// The folder shown last frame: any change (click, key, history) re-aims scrolling.
     shown: PathBuf,
+    jobs: Jobs,
+    clip: Option<Clip>,
+    menu: Option<Menu>,
+    rename: Option<Rename>,
+    /// A right-click waiting for the next frame (which knows what is under it).
+    right_click: Option<(f32, f32)>,
+    /// Typed to find a name (type-to-find), and whether nothing matched.
+    find: String,
+    find_miss: bool,
+    /// The last thing that happened ("Copied “a”", "Error: …"), until the next one.
+    note: Option<String>,
+    /// Delete Forever asked about this trashed item; the same again does it.
+    confirm: Option<OsString>,
+    /// Text for the system clipboard (a copied path).
+    copy_text: Option<String>,
 }
 
 impl View {
-    pub fn new() -> Self {
-        View {
+    pub fn new() -> io::Result<Self> {
+        Ok(View {
             quit: false,
             places: Places::new(),
             scroll: Scroll::default(),
@@ -78,7 +87,17 @@ impl View {
             last_click: None,
             page: 1,
             shown: PathBuf::new(),
-        }
+            jobs: Jobs::new()?,
+            clip: None,
+            menu: None,
+            rename: None,
+            right_click: None,
+            find: String::new(),
+            find_miss: false,
+            note: None,
+            confirm: None,
+            copy_text: None,
+        })
     }
 
     /// Show the grid instead of the list.
@@ -87,12 +106,10 @@ impl View {
     }
 
     /// Clipboard work the app must do after a frame: read it (Ctrl+V in the
-    /// location field) and/or put text on it (Ctrl+C).
+    /// location field) and/or put text on it (a copied path, or field text).
     pub fn clipboard(&mut self) -> (bool, Option<String>) {
-        (
-            std::mem::take(&mut self.loc.paste_wanted),
-            self.loc.copy.take(),
-        )
+        let copy = self.loc.copy.take().or_else(|| self.copy_text.take());
+        (std::mem::take(&mut self.loc.paste_wanted), copy)
     }
 
     /// Clipboard text that arrived for the location field.
@@ -105,13 +122,54 @@ impl View {
         self.places.resizing()
     }
 
+    /// The pipe finished file jobs report through (the app polls it).
+    pub fn jobs_fd(&self) -> BorrowedFd<'_> {
+        self.jobs.fd()
+    }
+
+    /// The right button went down at `pos`: a menu opens on the next frame.
+    pub fn right_click(&mut self, pos: (f32, f32)) {
+        self.right_click = Some(pos);
+    }
+
     pub fn scroll_by(&mut self, discrete: i32, px: f64) {
-        self.scroll.wheel(discrete, px);
+        if self.menu.is_none() {
+            self.scroll.wheel(discrete, px);
+        }
     }
 
     pub fn draw(&mut self, ui: &mut Ui, b: &mut Browser) {
         let (gen0, open0) = (b.generation, self.loc.open);
         self.keys(ui, b);
+        // While the menu is open the content below must not see the pointer.
+        let pointer = self.menu.is_some().then(|| hide_pointer(ui));
+        self.frame(ui, b);
+        if let Some(saved) = pointer {
+            restore_pointer(ui, saved);
+        }
+        if let Some(at) = self.right_click.take() {
+            let n = b.entries.len();
+            let on = if self.mode == LIST {
+                self.list.at(at, n)
+            } else {
+                self.grid.at(at, n)
+            };
+            self.open_menu(ui, at, on, b);
+        }
+        let name = self.item_rects(b.sel).map(|r| r.1);
+        if self.rename.is_some() {
+            self.rename(ui, b, name);
+        }
+        self.menu(ui, b);
+        // Changed after parts were drawn (a click opened a folder, a bar came or
+        // went): draw again, no event will ask for it.
+        if b.generation != gen0 || self.loc.open != open0 {
+            ui.redraw();
+        }
+    }
+
+    /// Everything but the menu and the rename field.
+    fn frame(&mut self, ui: &mut Ui, b: &mut Browser) {
         let (w, h) = ui.p.size();
         // The frame (places, toolbar, status bar) is one surface; the list sits in a
         // rounded pane set into it (owner: square inner corners looked "hard").
@@ -130,7 +188,7 @@ impl View {
         if toolbar::draw(ui, b, bar, &mut self.mode, &mut self.loc) {
             self.scroll.follow();
         }
-        status(ui, b, Rect::new(nav_w, h - ROW_H, cw, ROW_H));
+        self.status(ui, b, Rect::new(nav_w, h - ROW_H, cw, ROW_H));
         let panel = pane.inset(S4);
         self.page = if self.mode == LIST {
             ((panel.h / ROW_H) as usize).saturating_sub(2)
@@ -141,19 +199,28 @@ impl View {
         if self.shown != b.cwd {
             self.shown.clone_from(&b.cwd);
             self.scroll.follow();
+            self.find.clear();
+            (self.confirm, self.note) = (None, None);
         }
         let clicked = if self.mode == LIST {
             self.list.draw(ui, b, panel, &mut self.scroll)
         } else {
             self.grid.draw(ui, b, panel, &mut self.scroll)
         };
+        if let Some(by) = self.list.sort_click.take() {
+            b.sort_by(by);
+        }
         if let Some(i) = clicked {
             self.click(b, i);
         }
-        // Changed after parts were drawn (a click opened a folder, the path bar came or
-        // went): draw again, no event will ask for it.
-        if b.generation != gen0 || self.loc.open != open0 {
-            ui.redraw();
+    }
+
+    /// Entry `i`'s row (or tile) and name cell, from last frame's layout.
+    fn item_rects(&self, i: usize) -> Option<(Rect, Rect)> {
+        if self.mode == LIST {
+            self.list.rects(i)
+        } else {
+            self.grid.rects(i)
         }
     }
 
@@ -172,83 +239,77 @@ impl View {
         }
     }
 
-    /// Nemo keys: Ctrl+L (or typing / or ~) edits the path, Alt+←/→ history, Alt+↑ or
-    /// Backspace up, Alt+Home home, Return
-    /// opens, Ctrl+H hidden files. Home/End and PgUp/PgDn jump. Arrows (or hjkl) move: in the grid ←/→ step and
-    /// ↑/↓ move a row; in the list ← goes up and → opens. Esc or q quits.
-    fn keys(&mut self, ui: &mut Ui, b: &mut Browser) {
-        if self.loc.open {
-            return; // the location field types; its Ctrl keys are handled there
+    /// The status bar, like Nemo's: on the left what just happened, the find text,
+    /// the filter or the item count (errors in red); on the right the selection.
+    fn status(&self, ui: &mut Ui, b: &Browser, r: Rect) {
+        let inner = Rect::new(r.x + S12, r.y, r.w - 2.0 * S12, r.h);
+        let (left, red) = self.status_text(b);
+        let small = Ink::new(SMALL, REGULAR, if red { ERROR } else { ui.pal.sub });
+        let half = Rect {
+            w: (inner.w / 2.0).round(),
+            ..inner
+        };
+        ui.text(half, &left, small, Align::Left);
+        if let Some(e) = b.entries.get(b.sel) {
+            let right = Rect {
+                x: half.x + half.w,
+                ..half
+            };
+            let small = ui.small();
+            ui.text(right, &selected(e), small, Align::Right);
         }
-        let grid = self.mode != LIST;
-        let row = self.grid.cols.max(1) as isize;
-        let page = self.page as isize;
-        let mut keys = std::mem::take(&mut ui.s.input.keys).into_iter();
-        while let Some(k) = keys.next() {
-            match (k.mods.alt, k.sym, k.text.as_str()) {
-                (true, KEY_LEFT, _) => b.travel(true),
-                (true, KEY_RIGHT, _) => b.travel(false),
-                (true, KEY_UP, _) | (_, KEY_BACKSPACE, _) => b.up(),
-                (true, KEY_HOME, _) => b.go(home(), None),
-                _ if k.mods.ctrl && k.sym == u32::from(b'h') => b.toggle_hidden(),
-                _ if k.mods.ctrl && k.sym == u32::from(b'l') => self.loc.start(ui, b, None),
-                (false, _, "/" | "~") if !k.mods.ctrl => self.loc.start(ui, b, Some(&k.text)),
-                (_, KEY_ESCAPE, _) | (_, _, "q") => self.quit = true,
-                (_, KEY_RETURN, _) => b.open(),
-                (_, KEY_HOME, _) => b.step(-isize::MAX),
-                (_, KEY_END, _) => b.step(isize::MAX),
-                (_, KEY_PAGE_UP, _) => b.step(-page),
-                (_, KEY_PAGE_DOWN, _) => b.step(page),
-                (_, KEY_UP, _) | (_, _, "k") => b.step(if grid { -row } else { -1 }),
-                (_, KEY_DOWN, _) | (_, _, "j") => b.step(if grid { row } else { 1 }),
-                (_, KEY_LEFT, _) | (_, _, "h") if grid => b.step(-1),
-                (_, KEY_RIGHT, _) | (_, _, "l") if grid => b.step(1),
-                (_, KEY_LEFT, _) | (_, _, "h") => b.up(),
-                (_, KEY_RIGHT, _) | (_, _, "l") => b.open(),
-                _ => continue,
-            }
-            if self.loc.open {
-                // Keys typed after `/` in the same frame belong to the field.
-                ui.s.input.keys = keys.collect();
-                return;
-            }
-            self.scroll.follow();
+    }
+
+    fn status_text(&self, b: &Browser) -> (String, bool) {
+        if !self.find.is_empty() {
+            return (format!("Find: {}", self.find), self.find_miss);
+        }
+        if let Some(e) = &b.error {
+            return (e.clone(), true);
+        }
+        if self.jobs.running > 0 {
+            return ("Working…".into(), false);
+        }
+        if let Some(n) = &self.note {
+            return (n.clone(), n.starts_with("Error"));
+        }
+        let count = count(b.entries.len(), b.hidden);
+        if b.filter.is_empty() {
+            (count, false)
+        } else {
+            (
+                format!("Filter \u{201c}{}\u{201d}: {count} (Esc clears)", b.filter),
+                false,
+            )
         }
     }
 }
 
-/// The status bar: item count (or the last error, in red) on the left, what is
-/// selected on the right, like Nemo's.
-fn status(ui: &mut Ui, b: &Browser, r: Rect) {
-    let inner = Rect::new(r.x + S12, r.y, r.w - 2.0 * S12, r.h);
-    let (note, color) = match &b.error {
-        Some(e) => (e.clone(), ERROR),
-        None => (count(b.entries.len(), b.hidden), ui.pal.sub),
-    };
-    let small = Ink::new(SMALL, REGULAR, color);
-    let half = Rect {
-        w: (inner.w / 2.0).round(),
-        ..inner
-    };
-    ui.text(half, &note, small, Align::Left);
-    if let Some(e) = b.entries.get(b.sel) {
-        let what = if let (true, Some(n)) = (e.dir, e.items) {
-            format!("\u{201c}{}\u{201d} selected ({})", e.name, dir::items(n))
-        } else if e.dir {
-            format!("\u{201c}{}\u{201d} selected", e.name)
-        } else {
-            format!(
-                "\u{201c}{}\u{201d} selected ({})",
-                e.name,
-                dir::human(e.size)
-            )
-        };
-        let right = Rect {
-            x: half.x + half.w,
-            ..half
-        };
-        let small = ui.small();
-        ui.text(right, &what, small, Align::Right);
+/// What the pointer did this frame, held back from the content under an open menu.
+type Pointer = ((f32, f32), bool, bool);
+
+fn hide_pointer(ui: &mut Ui) -> Pointer {
+    let i = &mut ui.s.input;
+    let saved = (i.pos, i.pressed, i.released);
+    (i.pos, i.pressed, i.released) = ((-1e6, -1e6), false, false);
+    saved
+}
+
+fn restore_pointer(ui: &mut Ui, (pos, pressed, released): Pointer) {
+    let i = &mut ui.s.input;
+    (i.pos, i.pressed, i.released) = (pos, pressed, released);
+}
+
+/// "“projects” selected (21 items)" / "(362 KB)".
+fn selected(e: &Entry) -> String {
+    match (e.dir, e.items) {
+        (true, Some(n)) => format!("\u{201c}{}\u{201d} selected ({})", e.name, dir::items(n)),
+        (true, None) => format!("\u{201c}{}\u{201d} selected", e.name),
+        (false, _) => format!(
+            "\u{201c}{}\u{201d} selected ({})",
+            e.name,
+            dir::human(e.size)
+        ),
     }
 }
 
