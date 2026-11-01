@@ -18,6 +18,8 @@ pub struct Browser {
     pub error: Option<String>,
     /// Show dotfiles (Ctrl+H).
     pub hidden: bool,
+    /// Bumped on every successful load: views cache per-folder measurements by it.
+    pub generation: u64,
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
 }
@@ -32,6 +34,7 @@ impl Browser {
             disk: None,
             error: None,
             hidden: false,
+            generation: 0,
             back: Vec::new(),
             forward: Vec::new(),
         };
@@ -55,6 +58,7 @@ impl Browser {
                     .unwrap_or(0);
                 self.disk = sys::disk(&path).ok();
                 (self.cwd, self.entries, self.error) = (path, entries, None);
+                self.generation += 1;
                 true
             }
             Err(e) => {

@@ -2,11 +2,14 @@
 //! Idle sleeps in poll with no timeout (0 CPU). Loop from frame's gallery.
 
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::{ErrorKind, Read};
+use std::os::fd::AsFd;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use frame::sys::watch::Watch;
-use frame::sys::{self, POLLIN, PollFd};
+use frame::sys::{self, POLLHUP, POLLIN, PollFd};
 use frame::ui::{State, Text, theme};
 use frame::window::{Canvas, Event, Pointer, Rect, Window};
 use frame::wl::Error;
@@ -32,6 +35,8 @@ struct App {
     /// Live refresh: inotify on the folder in `watching`.
     watch: Option<Watch>,
     watching: PathBuf,
+    /// A paste being read: the pipe from the clipboard owner and what came so far.
+    paste: Option<(File, Vec<u8>)>,
 }
 
 /// Open the window on the folder given as the first argument, else home (like
@@ -55,6 +60,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         titled: PathBuf::new(),
         watch: None,
         watching: PathBuf::new(),
+        paste: None,
     };
     app.run()?;
     Ok(())
@@ -122,21 +128,68 @@ impl App {
             at.saturating_duration_since(Instant::now()).as_millis() as i32
         });
         let mut fds = vec![PollFd::new(self.win.fd(), POLLIN)];
-        if let Some(w) = &self.watch {
+        // Optional fds after the window: the folder watch, then a paste in flight.
+        let watch_at = self.watch.as_ref().map(|w| {
             fds.push(PollFd::new(w.fd(), POLLIN));
-        }
+            fds.len() - 1
+        });
+        let paste_at = self.paste.as_ref().map(|(f, _)| {
+            fds.push(PollFd::new(f.as_fd(), POLLIN | POLLHUP));
+            fds.len() - 1
+        });
         sys::wait(&mut fds, timeout)?;
-        let changed = fds.get(1).is_some_and(|f| f.ready(POLLIN));
+        let ready = |at: Option<usize>| at.is_some_and(|i| fds[i].ready(POLLIN | POLLHUP));
+        let (changed, pasting) = (ready(watch_at), ready(paste_at));
         drop(fds);
         self.win.dispatch()?;
         self.win.tick(Instant::now());
+        let pasted = pasting && self.read_paste();
         if changed && self.watch.as_mut().is_some_and(Watch::drain) {
             self.browser.reload();
             // Re-arm: if the folder was removed and made again, the old watch is dead.
             self.watching.clear();
             return Ok(true);
         }
-        Ok(false)
+        Ok(pasted)
+    }
+
+    /// Read what the clipboard owner wrote into the paste pipe. At the end (EOF or an
+    /// error) hand the text to the view; true then (needs a redraw).
+    fn read_paste(&mut self) -> bool {
+        let Some((file, buf)) = &mut self.paste else {
+            return false;
+        };
+        let mut chunk = [0u8; 4096];
+        loop {
+            match file.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == ErrorKind::WouldBlock => return false,
+                Err(_) => break,
+            }
+        }
+        let text = self
+            .paste
+            .take()
+            .map(|(_, b)| String::from_utf8_lossy(&b).into_owned());
+        self.view.paste(text.unwrap_or_default());
+        true
+    }
+
+    /// After a frame: copy what the view wants copied, start reading a paste.
+    fn clipboard(&mut self) -> Result<(), Error> {
+        let (want, copy) = self.view.clipboard();
+        if let Some(t) = copy {
+            self.win.copy(t)?;
+        }
+        if want {
+            // shortcut: text only; an image on the clipboard pastes nothing.
+            self.paste = self
+                .win
+                .paste(false)?
+                .map(|(fd, _)| (File::from(fd), Vec::new()));
+        }
+        Ok(())
     }
 
     /// Draw a full frame into a free buffer. False if none is free yet.
@@ -163,12 +216,17 @@ impl App {
         self.view.draw(&mut ui, &mut self.browser);
         ui.end();
         self.win.present(i, &[full])?;
-        let shape = if self.ui.pointer {
+        let shape = if self.view.resize_cursor() {
+            cursor_shape::SHAPE_EW_RESIZE
+        } else if self.ui.text_cursor {
+            cursor_shape::SHAPE_TEXT
+        } else if self.ui.pointer {
             cursor_shape::SHAPE_POINTER
         } else {
             cursor_shape::SHAPE_DEFAULT
         };
         self.win.set_cursor(shape)?;
+        self.clipboard()?;
         if self.titled != self.browser.cwd {
             self.titled.clone_from(&self.browser.cwd);
             let name = self

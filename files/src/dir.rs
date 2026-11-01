@@ -17,6 +17,9 @@ pub struct Entry {
     pub dir: bool,
     /// Bytes; 0 for folders.
     pub size: u64,
+    /// How many entries a folder holds (dotfiles only when shown); None for files or
+    /// folders we can't read.
+    pub items: Option<usize>,
     /// Unix seconds; 0 if unknown.
     pub modified: i64,
 }
@@ -57,17 +60,39 @@ pub fn list(path: &Path, hidden: bool) -> Result<Vec<Entry>, Error> {
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_secs() as i64);
             let size = meta.filter(|_| !dir).map_or(0, |m| m.len());
+            // One read_dir per subfolder, not recursive: what Nemo shows in Size.
+            let items = dir.then(|| count(&e.path(), hidden)).flatten();
             Some(Entry {
                 name,
                 os,
                 dir,
                 size,
+                items,
                 modified,
             })
         })
         .collect();
     out.sort_by_cached_key(|e| (!e.dir, e.name.to_lowercase()));
     Ok(out)
+}
+
+/// Entries in folder `p`, dotfiles only when `hidden`.
+fn count(p: &Path, hidden: bool) -> Option<usize> {
+    let rd = fs::read_dir(p).ok()?;
+    Some(
+        rd.filter_map(Result::ok)
+            .filter(|e| hidden || !e.file_name().as_encoded_bytes().starts_with(b"."))
+            .count(),
+    )
+}
+
+/// "1 item", "17 items".
+pub fn items(n: usize) -> String {
+    if n == 1 {
+        "1 item".into()
+    } else {
+        format!("{n} items")
+    }
 }
 
 /// A short size: `512 B`, `4.2 KB`, `13 MB`.
@@ -216,6 +241,7 @@ mod tests {
             os: name.into(),
             dir,
             size: 0,
+            items: None,
             modified: 0,
         };
         assert_eq!(kind(&e("src", true)), (Kind::Folder, "Folder".into()));
@@ -225,6 +251,19 @@ mod tests {
             kind(&e("x.weird", false)),
             (Kind::Other, "WEIRD file".into())
         );
+    }
+
+    #[test]
+    fn folders_count_their_entries() {
+        let root = std::env::temp_dir().join(format!("files-count-{}", std::process::id()));
+        fs::create_dir_all(root.join("d/sub")).unwrap();
+        fs::write(root.join("d/x"), "1").unwrap();
+        fs::write(root.join("d/.y"), "1").unwrap();
+        let shown = list(&root, false).unwrap()[0].items;
+        let all = list(&root, true).unwrap()[0].items;
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!((shown, all), (Some(2), Some(3)));
+        assert_eq!(items(1), "1 item");
     }
 
     #[test]

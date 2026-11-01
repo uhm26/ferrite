@@ -1,8 +1,7 @@
-//! The folder as a grid of tiles on one panel (Nemo's icon view): a large icon,
+//! The folder as a grid of tiles straight on the window (Nemo's icon view): a large icon,
 //! the name under it. Tiles stretch to fill each row exactly; only rows in view
 //! are drawn.
 
-use frame::ui::paint::mix;
 use frame::ui::theme::*;
 use frame::ui::{Align, Rect, Ui};
 
@@ -32,8 +31,7 @@ impl Grid {
         panel: Rect,
         scroll: &mut Scroll,
     ) -> Option<usize> {
-        ui.panel(panel);
-        let inner = panel.inset(S8);
+        let inner = panel;
         if b.entries.is_empty() {
             super::empty(ui, inner);
             return None;
@@ -80,7 +78,7 @@ fn tile(ui: &mut Ui, b: &Browser, i: usize, t: Rect) -> bool {
     let clicked = ui.row(&id, t, i == b.sel);
     let sel = ui.spring(&id, f32::from(i == b.sel), SNAP);
     let e = &b.entries[i];
-    let color = mix(ui.pal.sub, ui.pal.text, sel);
+    let color = super::icon_color(ui, e, sel);
     let icon_r = Rect::new(t.x, t.y + S8, t.w, ICON_BOX - S8);
     ui.icon(super::icon(e), icon_r, 2.0 * ICON, color);
     let name = Rect::new(t.x + S8, t.y + ICON_BOX + S4, t.w - 2.0 * S8, NAME_H);

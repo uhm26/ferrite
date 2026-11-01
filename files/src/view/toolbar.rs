@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use frame::ui::theme::*;
 use frame::ui::{Icon, Rect, Ui};
 
+use super::location::Location;
 use super::sidebar::home;
 use crate::browse::Browser;
 
@@ -14,7 +15,7 @@ use crate::browse::Browser;
 const SEP: f32 = 12.0;
 
 /// Draw the bar in `r`; true if the view switch changed `mode`.
-pub fn draw(ui: &mut Ui, b: &mut Browser, r: Rect, mode: &mut usize) -> bool {
+pub fn draw(ui: &mut Ui, b: &mut Browser, r: Rect, mode: &mut usize, loc: &mut Location) -> bool {
     let nav = [
         (Icon::Back, b.can_back()),
         (Icon::Forward, b.can_forward()),
@@ -36,12 +37,27 @@ pub fn draw(ui: &mut Ui, b: &mut Browser, r: Rect, mode: &mut usize) -> bool {
     let seg_x = r.x + r.w - seg_w;
     let changed = ui.segment("view", (seg_x, r.y), &[Icon::List, Icon::Grid], mode);
     let room = Rect::new(x + S8, r.y, (seg_x - S12 - x - S8).max(0.0), r.h);
-    crumbs(ui, b, room);
+    if loc.open {
+        loc.draw(ui, b, room);
+        return changed;
+    }
+    // Empty space in the path bar opens the location field (crumbs drawn after win
+    // their own clicks).
+    let edit = ui.clicked("crumbs/space", room);
+    if crumbs(ui, b, room) {
+        return changed;
+    }
+    if edit {
+        // Open and draw the field in this same frame: no wait for the next event.
+        loc.start(ui, b, None);
+        loc.draw(ui, b, room);
+    }
     changed
 }
 
-/// One ghost button per folder from home (or `/`) down to where we are.
-fn crumbs(ui: &mut Ui, b: &mut Browser, r: Rect) {
+/// One ghost button per folder from home (or `/`) down to where we are. True if a
+/// crumb was clicked.
+fn crumbs(ui: &mut Ui, b: &mut Browser, r: Rect) -> bool {
     let trail = trail(&b.cwd, &home());
     let widths: Vec<f32> = trail
         .iter()
@@ -92,9 +108,11 @@ fn crumbs(ui: &mut Ui, b: &mut Browser, r: Rect) {
         x += cr.w;
     }
     ui.p.clip(None);
+    let went = go.is_some();
     if let Some(p) = go {
         b.go(p, None);
     }
+    went
 }
 
 /// A small chevron at `x`; returns the x after it.

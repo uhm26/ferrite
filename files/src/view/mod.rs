@@ -6,6 +6,7 @@
 
 mod grid;
 mod list;
+mod location;
 mod scroll;
 mod sidebar;
 mod toolbar;
@@ -13,6 +14,7 @@ mod toolbar;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use frame::ui::paint::mix;
 use frame::ui::text::REGULAR;
 use frame::ui::theme::*;
 use frame::ui::{Align, Icon, Ink, Rect, Ui};
@@ -20,6 +22,8 @@ use frame::ui::{Align, Icon, Ink, Rect, Ui};
 use crate::browse::Browser;
 use crate::dir::{self, Entry, Kind};
 use grid::Grid;
+use list::List;
+use location::Location;
 use scroll::Scroll;
 use sidebar::Places;
 
@@ -40,8 +44,8 @@ const KEY_END: u32 = 0xff57;
 
 /// GTK's default double-click time.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
-/// Title line under the toolbar.
-const TITLE_H: f32 = 32.0;
+/// The toolbar band: one control with 8 above and below.
+const BAR_H: f32 = CONTROL_H + 2.0 * S8;
 /// The view switch: list or grid.
 const LIST: usize = 0;
 
@@ -50,6 +54,8 @@ pub struct View {
     places: Places,
     scroll: Scroll,
     grid: Grid,
+    list: List,
+    loc: Location,
     /// [`LIST`] or grid.
     mode: usize,
     last_click: Option<(usize, Instant)>,
@@ -66,6 +72,8 @@ impl View {
             places: Places::new(),
             scroll: Scroll::default(),
             grid: Grid::default(),
+            list: List::default(),
+            loc: Location::default(),
             mode: LIST,
             last_click: None,
             page: 1,
@@ -78,26 +86,52 @@ impl View {
         self.mode = usize::from(on);
     }
 
+    /// Clipboard work the app must do after a frame: read it (Ctrl+V in the
+    /// location field) and/or put text on it (Ctrl+C).
+    pub fn clipboard(&mut self) -> (bool, Option<String>) {
+        (
+            std::mem::take(&mut self.loc.paste_wanted),
+            self.loc.copy.take(),
+        )
+    }
+
+    /// Clipboard text that arrived for the location field.
+    pub fn paste(&mut self, text: String) {
+        self.loc.paste(text);
+    }
+
+    /// The pointer is on the sidebar's resize edge (or dragging it).
+    pub fn resize_cursor(&self) -> bool {
+        self.places.resizing()
+    }
+
     pub fn scroll_by(&mut self, discrete: i32, px: f64) {
         self.scroll.wheel(discrete, px);
     }
 
     pub fn draw(&mut self, ui: &mut Ui, b: &mut Browser) {
+        let (gen0, open0) = (b.generation, self.loc.open);
         self.keys(ui, b);
         let (w, h) = ui.p.size();
-        let window = ui.pal.window;
-        ui.p.clear(window);
+        // The frame (places, toolbar, status bar) is one surface; the list sits in a
+        // rounded pane set into it (owner: square inner corners looked "hard").
+        let (side, window) = (ui.pal.sidebar, ui.pal.window);
+        ui.p.clear(side);
         let nav_w = self.places.draw(ui, b);
-        let x = nav_w + S24;
-        let cw = (w - x - S24).max(0.0);
-        let bar = Rect::new(x, S16, cw, CONTROL_H);
-        if toolbar::draw(ui, b, bar, &mut self.mode) {
+        let cw = (w - nav_w).max(0.0);
+        let pane = Rect::new(
+            nav_w,
+            BAR_H,
+            (cw - S8).max(0.0),
+            (h - BAR_H - ROW_H).max(0.0),
+        );
+        ui.p.rect(pane, R_PANEL, window);
+        let bar = Rect::new(nav_w + S12, S8, cw - 2.0 * S12, CONTROL_H);
+        if toolbar::draw(ui, b, bar, &mut self.mode, &mut self.loc) {
             self.scroll.follow();
         }
-        let ty = bar.y + bar.h + S12;
-        title(ui, b, Rect::new(x, ty, cw, TITLE_H));
-        let top = ty + TITLE_H + S12;
-        let panel = Rect::new(x, top, cw, (h - top - S24).max(0.0));
+        status(ui, b, Rect::new(nav_w, h - ROW_H, cw, ROW_H));
+        let panel = pane.inset(S4);
         self.page = if self.mode == LIST {
             ((panel.h / ROW_H) as usize).saturating_sub(2)
         } else {
@@ -109,12 +143,17 @@ impl View {
             self.scroll.follow();
         }
         let clicked = if self.mode == LIST {
-            list::draw(ui, b, panel, &mut self.scroll)
+            self.list.draw(ui, b, panel, &mut self.scroll)
         } else {
             self.grid.draw(ui, b, panel, &mut self.scroll)
         };
         if let Some(i) = clicked {
             self.click(b, i);
+        }
+        // Changed after parts were drawn (a click opened a folder, the path bar came or
+        // went): draw again, no event will ask for it.
+        if b.generation != gen0 || self.loc.open != open0 {
+            ui.redraw();
         }
     }
 
@@ -133,20 +172,27 @@ impl View {
         }
     }
 
-    /// Nemo keys: Alt+←/→ history, Alt+↑ or Backspace up, Alt+Home home, Return
+    /// Nemo keys: Ctrl+L (or typing / or ~) edits the path, Alt+←/→ history, Alt+↑ or
+    /// Backspace up, Alt+Home home, Return
     /// opens, Ctrl+H hidden files. Home/End and PgUp/PgDn jump. Arrows (or hjkl) move: in the grid ←/→ step and
     /// ↑/↓ move a row; in the list ← goes up and → opens. Esc or q quits.
     fn keys(&mut self, ui: &mut Ui, b: &mut Browser) {
+        if self.loc.open {
+            return; // the location field types; its Ctrl keys are handled there
+        }
         let grid = self.mode != LIST;
         let row = self.grid.cols.max(1) as isize;
         let page = self.page as isize;
-        for k in std::mem::take(&mut ui.s.input.keys) {
+        let mut keys = std::mem::take(&mut ui.s.input.keys).into_iter();
+        while let Some(k) = keys.next() {
             match (k.mods.alt, k.sym, k.text.as_str()) {
                 (true, KEY_LEFT, _) => b.travel(true),
                 (true, KEY_RIGHT, _) => b.travel(false),
                 (true, KEY_UP, _) | (_, KEY_BACKSPACE, _) => b.up(),
                 (true, KEY_HOME, _) => b.go(home(), None),
                 _ if k.mods.ctrl && k.sym == u32::from(b'h') => b.toggle_hidden(),
+                _ if k.mods.ctrl && k.sym == u32::from(b'l') => self.loc.start(ui, b, None),
+                (false, _, "/" | "~") if !k.mods.ctrl => self.loc.start(ui, b, Some(&k.text)),
                 (_, KEY_ESCAPE, _) | (_, _, "q") => self.quit = true,
                 (_, KEY_RETURN, _) => b.open(),
                 (_, KEY_HOME, _) => b.step(-isize::MAX),
@@ -161,37 +207,49 @@ impl View {
                 (_, KEY_RIGHT, _) | (_, _, "l") => b.open(),
                 _ => continue,
             }
+            if self.loc.open {
+                // Keys typed after `/` in the same frame belong to the field.
+                ui.s.input.keys = keys.collect();
+                return;
+            }
             self.scroll.follow();
         }
     }
 }
 
-/// The folder's name, and how many entries it has (or the last error, in red).
-fn title(ui: &mut Ui, b: &Browser, r: Rect) {
-    let name = if b.cwd == home() {
-        "Home".to_string()
-    } else {
-        b.cwd
-            .file_name()
-            .map_or("/".into(), |n| n.to_string_lossy().into_owned())
-    };
-    let ink = ui.title_ink();
-    let room = (r.w * 0.6).round();
-    let name_w = ui.s.text.width(&name, ink).min(room);
-    ui.text(Rect { w: room, ..r }, &name, ink, Align::Left);
+/// The status bar: item count (or the last error, in red) on the left, what is
+/// selected on the right, like Nemo's.
+fn status(ui: &mut Ui, b: &Browser, r: Rect) {
+    let inner = Rect::new(r.x + S12, r.y, r.w - 2.0 * S12, r.h);
     let (note, color) = match &b.error {
         Some(e) => (e.clone(), ERROR),
         None => (count(b.entries.len(), b.hidden), ui.pal.sub),
     };
     let small = Ink::new(SMALL, REGULAR, color);
-    let nx = r.x + name_w + S12;
-    // Baseline-align the note with the title rather than centering it.
-    let base = ui.s.text.center(r.y, r.h, ink);
-    let note =
-        ui.s.text
-            .ellipsize(&note, r.x + r.w - nx, small)
-            .into_owned();
-    ui.label((nx, base), &note, small);
+    let half = Rect {
+        w: (inner.w / 2.0).round(),
+        ..inner
+    };
+    ui.text(half, &note, small, Align::Left);
+    if let Some(e) = b.entries.get(b.sel) {
+        let what = if let (true, Some(n)) = (e.dir, e.items) {
+            format!("\u{201c}{}\u{201d} selected ({})", e.name, dir::items(n))
+        } else if e.dir {
+            format!("\u{201c}{}\u{201d} selected", e.name)
+        } else {
+            format!(
+                "\u{201c}{}\u{201d} selected ({})",
+                e.name,
+                dir::human(e.size)
+            )
+        };
+        let right = Rect {
+            x: half.x + half.w,
+            ..half
+        };
+        let small = ui.small();
+        ui.text(right, &what, small, Align::Right);
+    }
 }
 
 fn count(n: usize, hidden: bool) -> String {
@@ -210,7 +268,7 @@ fn count(n: usize, hidden: bool) -> String {
 /// The icon for an entry's kind.
 fn icon(e: &Entry) -> Icon {
     match dir::kind(e).0 {
-        Kind::Folder => Icon::Folder,
+        Kind::Folder => Icon::FolderFill,
         Kind::Image => Icon::Image,
         Kind::Audio => Icon::Music,
         Kind::Video => Icon::Video,
@@ -218,6 +276,17 @@ fn icon(e: &Entry) -> Icon {
         Kind::Code => Icon::Code,
         Kind::Archive | Kind::Other => Icon::File,
     }
+}
+
+/// Icon color: solid folders in a calm gray, file outlines in `sub`; both lift to
+/// `text` as the row is selected (`sel` 0-1).
+fn icon_color(ui: &Ui, e: &Entry, sel: f32) -> u32 {
+    let rest = if e.dir {
+        mix(ui.pal.dim, ui.pal.sub, 0.55)
+    } else {
+        ui.pal.sub
+    };
+    mix(rest, ui.pal.text, sel)
 }
 
 /// "This folder is empty", centered in `r` under a large folder.
