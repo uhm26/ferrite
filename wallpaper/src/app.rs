@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::image::{self, Rgb};
@@ -102,6 +102,18 @@ pub fn run(image: PathBuf, listener: &UnixListener) -> Result<(), Error> {
     match r {
         Err(Error::Wayland(wl::Error::Closed)) => Ok(()),
         other => other,
+    }
+}
+
+/// Only a broken compositor connection ends the daemon; anything else is logged.
+fn survivable(r: Result<(), Error>) -> Result<(), Error> {
+    match r {
+        Err(Error::Wayland(e)) => Err(Error::Wayland(e)),
+        Err(e) => {
+            eprintln!("wall: {e}");
+            Ok(())
+        }
+        Ok(()) => Ok(()),
     }
 }
 
@@ -344,7 +356,9 @@ impl App {
                 self.conn.read()?;
                 self.dispatch_all()?;
                 self.ensure_surfaces()?;
-                self.draw(None, Default::default())?;
+                // A failed redraw (image moved away, out of memory) leaves the
+                // surfaces dirty, so the next compositor event retries it.
+                survivable(self.draw(None, Default::default()))?;
             }
             if fds[1].revents != 0 {
                 self.serve_client(listener)?;
@@ -353,22 +367,40 @@ impl App {
     }
 
     fn serve_client(&mut self, listener: &UnixListener) -> Result<(), Error> {
+        let mut asks = Vec::new();
         while let Some(ask) = ipc::accept(listener)? {
-            let t = Instant::now();
-            match image::load(&ask.image) {
-                Ok(img) => {
-                    self.image = ask.image.clone();
-                    for surf in self.screens.iter_mut().filter_map(|s| s.surf.as_mut()) {
-                        surf.dirty = surf.size != (0, 0);
-                    }
-                    let decode = t.elapsed();
-                    self.draw(Some(img), decode)?;
-                    ipc::remember(&self.image);
+            asks.push(ask);
+        }
+        // Newest first: once one is shown, the ones queued before it are moot.
+        while let Some(ask) = asks.pop() {
+            match self.switch(&ask.image) {
+                Ok(()) => {
                     ask.answer(Ok(()));
+                    for old in asks.drain(..) {
+                        old.answer(Err("skipped: a newer wallpaper came in".into()));
+                    }
                 }
-                Err(e) => ask.answer(Err(e.to_string())),
+                Err(e) => {
+                    ask.answer(Err(e.to_string()));
+                    if matches!(e, Error::Wayland(_)) {
+                        return Err(e);
+                    }
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Decode `image` and draw it on every output.
+    fn switch(&mut self, image: &Path) -> Result<(), Error> {
+        let t = Instant::now();
+        let img = image::load(image)?;
+        self.image = image.to_path_buf();
+        for surf in self.screens.iter_mut().filter_map(|s| s.surf.as_mut()) {
+            surf.dirty = surf.size != (0, 0);
+        }
+        self.draw(Some(img), t.elapsed())?;
+        ipc::remember(&self.image);
         Ok(())
     }
 
