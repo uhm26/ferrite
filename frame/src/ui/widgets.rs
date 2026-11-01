@@ -1,19 +1,14 @@
 //! The components, flat (theme.rs): text helpers, panel, button, icon button, ghost,
-//! segmented control, switch, row, navigation entry, text field, meter and scroll
+//! segmented control, switch, row, navigation entry, meter and scroll
 //! thumb. Each draws from the palette, animates hover, press and selection on
 //! springs, and reports clicks or edits. Layout is the caller's: widgets get a
-//! rect or a spot. No shadows, no outlines (except a focused field's ring).
+//! rect or a spot. No shadows, no outlines (a focused field keeps a ring: field.rs).
 
 use super::ctx::Ui;
 use super::icon::Icon;
 use super::paint::{Rect, mix};
 use super::text::{Ink, MEDIUM, REGULAR, SEMIBOLD};
 use super::theme::*;
-
-/// xkbcommon keysyms (xkbcommon-keysyms.h).
-const KEY_BACKSPACE: u32 = 0xff08;
-const KEY_RETURN: u32 = 0xff0d;
-const KEY_ESCAPE: u32 = 0xff1b;
 
 /// Fully transparent: the "no background" end of a hover mix.
 const CLEAR: u32 = 0;
@@ -273,58 +268,6 @@ impl Ui<'_> {
             Align::Left,
         );
         clicked
-    }
-
-    /// A one-line text field. Click focuses it; typing edits `value`; Esc or Return
-    /// lets go. Returns whether `value` changed.
-    pub fn field(&mut self, name: &str, r: Rect, value: &mut String, placeholder: &str) -> bool {
-        let r = r.round();
-        if self.hovered(r) && self.s.input.pressed {
-            self.take_focus(name);
-        }
-        let changed = self.focused(name) && self.edit(value);
-        let f = self.spring(name, f32::from(self.focused(name)), SNAP);
-        let pal = self.pal;
-        self.p.rect(r, RADIUS, mix(pal.raise, pal.hover, f));
-        // Focus shows as a ring: keyboard users must see where typing goes.
-        self.p.stroke(r, RADIUS, 1.0, mix(CLEAR, pal.sub, f));
-        let ink = self.body();
-        let y = self.s.text.center(r.y, r.h, ink);
-        self.p.clip(Some(r.inset(1.0)));
-        let end = if value.is_empty() {
-            self.label((r.x + S12, y), placeholder, ink.color(pal.sub));
-            r.x + S12
-        } else {
-            self.label((r.x + S12, y), value, ink)
-        };
-        if self.focused(name) {
-            // The caret: accent, still (no blink keeps idle at 0 CPU).
-            let cap = self.s.text.metrics(ink.px, ink.style).cap;
-            let caret = Rect::new(end.round() + 1.0, y - cap - 2.0, 2.0, cap + 4.0);
-            self.p.rect(caret, 0.0, ACCENT);
-        }
-        self.p.clip(None);
-        changed
-    }
-
-    /// Apply this frame's keys to `value`. True if it changed.
-    fn edit(&mut self, value: &mut String) -> bool {
-        let mut changed = false;
-        for k in std::mem::take(&mut self.s.input.keys) {
-            match k.sym {
-                KEY_ESCAPE | KEY_RETURN => self.s.focus = None,
-                KEY_BACKSPACE => changed |= value.pop().is_some(),
-                _ if !k.mods.ctrl
-                    && !k.text.is_empty()
-                    && !k.text.chars().any(char::is_control) =>
-                {
-                    value.push_str(&k.text);
-                    changed = true;
-                }
-                _ => {}
-            }
-        }
-        changed
     }
 
     /// A thin bar showing `frac` (0-1) of a whole: absolute, never rescaled.

@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use super::field::Edit;
 use super::icon::Icon;
 use super::motion::{Spring, Tween};
 use super::paint::{Painter, Rect};
@@ -53,8 +54,14 @@ pub struct State {
     dt: f32,
     moving: bool,
     /// The widget the button went down on.
-    active: Option<u64>,
-    focus_taken: bool,
+    pub(crate) active: Option<u64>,
+    pub(crate) focus_taken: bool,
+    /// Caret and selection of the focused field.
+    pub(crate) edit: Edit,
+    /// Last frame the pointer was over a text field: show the I-beam cursor.
+    pub text_cursor: bool,
+    /// The field Return was pressed in this frame.
+    pub(crate) submitted: Option<u64>,
 }
 
 /// A stable id for a widget name (FNV-1a).
@@ -81,6 +88,9 @@ impl State {
             moving: false,
             active: None,
             focus_taken: false,
+            edit: Edit::END,
+            text_cursor: false,
+            submitted: None,
         }
     }
 
@@ -88,6 +98,7 @@ impl State {
     pub fn begin<'a>(&'a mut self, c: Canvas<'a>, dt: f32) -> Ui<'a> {
         self.frame += 1;
         (self.dt, self.moving, self.pointer, self.focus_taken) = (dt, false, false, false);
+        self.text_cursor = false;
         Ui {
             p: Painter::new(c),
             pal: Palette::new(self.glass),
@@ -175,6 +186,30 @@ impl Ui<'_> {
     pub fn take_focus(&mut self, name: &str) {
         self.s.focus = Some(id(name));
         self.s.focus_taken = true;
+        self.s.edit = Edit::END;
+        // A fresh focus starts its caret and selection where they are, no slide from
+        // wherever the last edit left them (field.rs springs).
+        for part in ["off", "a", "b", "c"] {
+            self.s.springs.remove(&id(&format!("{name}/{part}")));
+        }
+    }
+
+    /// Ask for another frame: something changed while drawing that the next frame
+    /// must show (no event will come to trigger it).
+    pub fn redraw(&mut self) {
+        self.s.moving = true;
+    }
+
+    /// `name` takes the keyboard with its whole text selected (e.g. a path bar
+    /// opened for editing).
+    pub fn take_focus_all(&mut self, name: &str) {
+        self.take_focus(name);
+        self.s.edit = Edit::ALL;
+    }
+
+    /// Return was pressed in field `name` this frame (the field already let go).
+    pub fn submitted(&self, name: &str) -> bool {
+        self.s.submitted == Some(id(name))
     }
 
     pub fn focused(&self, name: &str) -> bool {
@@ -187,6 +222,7 @@ impl Ui<'_> {
         if i.pressed && !self.s.focus_taken {
             self.s.focus = None;
         }
+        self.s.submitted = None;
         if i.released {
             self.s.active = None;
         }
@@ -240,6 +276,50 @@ mod tests {
         };
         assert!(!hit(&mut s, (10.0, 10.0)), "clipped part took the click");
         assert!(hit(&mut s, (10.0, 60.0)));
+    }
+
+    /// A field opened with everything selected: typing replaces, Return submits.
+    #[test]
+    fn field_select_all_replaces_and_return_submits() {
+        use crate::xkb::{Key, Mods};
+        let key = |sym: u32, text: &str| Key {
+            sym,
+            text: text.into(),
+            mods: Mods::default(),
+            repeat: false,
+        };
+        let mut s = State::new(Text::new(FAMILY).unwrap());
+        let mut px = vec![0u32; 200 * 40];
+        let mut value = String::from("/old/path");
+        let r = Rect::new(0.0, 0.0, 200.0, 32.0);
+        let mut frame = |s: &mut State, keys: Vec<Key>, value: &mut String, open: bool| -> bool {
+            s.input.keys = keys;
+            let mut ui = s.begin(
+                Canvas {
+                    px: &mut px,
+                    w: 200,
+                    h: 40,
+                },
+                0.0,
+            );
+            if open {
+                ui.take_focus_all("path");
+            }
+            ui.field("path", r, value, "");
+            let done = ui.submitted("path");
+            ui.end();
+            done
+        };
+        frame(&mut s, vec![], &mut value, true);
+        frame(
+            &mut s,
+            vec![key(0x2f, "/"), key(0x74, "t")],
+            &mut value,
+            false,
+        );
+        assert_eq!(value, "/t", "typing replaced the selected text");
+        assert!(frame(&mut s, vec![key(0xff0d, "\r")], &mut value, false));
+        assert!(s.focus.is_none());
     }
 
     /// `slide` glides to a new target over a few frames instead of jumping.

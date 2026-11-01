@@ -138,4 +138,6 @@ pub mod cursor_shape {
     pub const SET_SHAPE: u16 = 1;
     pub const SHAPE_DEFAULT: u32 = 1; // the normal arrow
     pub const SHAPE_POINTER: u32 = 4; // clickable element
+    pub const SHAPE_TEXT: u32 = 9; // text field
+    pub const SHAPE_EW_RESIZE: u32 = 26; // a border dragged left/right
 }

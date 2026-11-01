@@ -132,7 +132,9 @@ impl App {
         self.stats.frame(now, now.elapsed());
         self.stats.animating = self.ui.animating();
         self.win.present(i, &[full])?;
-        let shape = if self.ui.pointer {
+        let shape = if self.ui.text_cursor {
+            cursor_shape::SHAPE_TEXT
+        } else if self.ui.pointer {
             cursor_shape::SHAPE_POINTER
         } else {
             cursor_shape::SHAPE_DEFAULT

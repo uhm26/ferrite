@@ -11,6 +11,8 @@ pub const STROKE: f32 = 1.5;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {
     Folder,
+    /// A solid folder: gives folder rows visual weight (owner: the look felt "empty").
+    FolderFill,
     File,
     Home,
     Desktop,
@@ -46,6 +48,8 @@ enum Shape {
     Dot((f32, f32), f32),
     /// Rounded box outline: x, y, w, h, radius.
     Frame(f32, f32, f32, f32, f32),
+    /// Filled polygon (closed).
+    Solid(&'static [(f32, f32)]),
 }
 
 use Shape::*;
@@ -59,14 +63,16 @@ const PAGE: [(f32, f32); 5] = [
     (6.0, 21.0),
 ];
 const FOLD: [(f32, f32); 3] = [(14.0, 3.0), (14.0, 8.0), (19.0, 8.0)];
-const FOLDER: &[Shape] = &[Loop(&[
+const FOLDER_PTS: [(f32, f32); 6] = [
     (3.0, 6.5),
     (9.5, 6.5),
     (11.5, 8.5),
     (21.0, 8.5),
     (21.0, 19.0),
     (3.0, 19.0),
-])];
+];
+const FOLDER: &[Shape] = &[Loop(&FOLDER_PTS)];
+const FOLDER_FILL: &[Shape] = &[Solid(&FOLDER_PTS)];
 const FILE: &[Shape] = &[Loop(&PAGE), Line(&FOLD)];
 const HOME: &[Shape] = &[
     Line(&[(3.0, 11.0), (12.0, 3.5), (21.0, 11.0)]),
@@ -144,8 +150,9 @@ const PLUS: &[Shape] = &[
 const MINUS: &[Shape] = &[Line(&[(5.0, 12.0), (19.0, 12.0)])];
 
 impl Icon {
-    pub const ALL: [Icon; 22] = [
+    pub const ALL: [Icon; 23] = [
         Icon::Folder,
+        Icon::FolderFill,
         Icon::File,
         Icon::Home,
         Icon::Desktop,
@@ -172,6 +179,7 @@ impl Icon {
     fn shapes(self) -> &'static [Shape] {
         match self {
             Icon::Folder => FOLDER,
+            Icon::FolderFill => FOLDER_FILL,
             Icon::File => FILE,
             Icon::Home => HOME,
             Icon::Desktop => DESKTOP,
@@ -231,6 +239,10 @@ fn distance(s: &Shape, p: (f32, f32)) -> (f32, bool) {
         Ring(c, r) => (len(p.0 - c.0, p.1 - c.1) - r, false),
         Dot(c, r) => (len(p.0 - c.0, p.1 - c.1) - r, true),
         Frame(x, y, w, h, r) => (sdf(&Rect::new(x, y, w, h), r, p.0, p.1), false),
+        Solid(pts) => {
+            let d = polyline(pts, p, true);
+            (if inside(pts, p) { -d } else { d }, true)
+        }
     }
 }
 
@@ -244,6 +256,17 @@ fn polyline(pts: &[(f32, f32)], p: (f32, f32), closed: bool) -> f32 {
     (0..segs)
         .map(|i| segment(pts[i], pts[(i + 1) % n], p))
         .fold(f32::MAX, f32::min)
+}
+
+/// Even-odd test: is `p` inside the closed polygon `pts`?
+fn inside(pts: &[(f32, f32)], p: (f32, f32)) -> bool {
+    let n = pts.len();
+    (0..n).fold(false, |odd, i| {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let crosses =
+            (a.1 > p.1) != (b.1 > p.1) && p.0 < a.0 + (p.1 - a.1) / (b.1 - a.1) * (b.0 - a.0);
+        odd != crosses
+    })
 }
 
 fn segment(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
@@ -271,6 +294,13 @@ mod tests {
         let m = Icon::Minus.mask(24); // a line along y = 12, x 5..19
         assert_eq!(m[11 * 24 + 12], 255 / 2 + 64); // pixel row 11 centre 11.5: 0.5 px off-line
         assert_eq!(m[4 * 24 + 12], 0);
+    }
+
+    #[test]
+    fn solid_folder_is_filled_inside() {
+        let m = Icon::FolderFill.mask(24);
+        assert_eq!(m[14 * 24 + 12], 255, "middle of the body");
+        assert_eq!(m[2 * 24 + 12], 0, "above the folder");
     }
 
     #[test]
