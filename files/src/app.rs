@@ -1,12 +1,14 @@
 //! The window loop: events in, a frame out when something changed or moves.
 //! Idle sleeps in poll with no timeout (0 CPU). Loop from frame's gallery.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use frame::sys::watch::Watch;
 use frame::sys::{self, POLLIN, PollFd};
 use frame::ui::{State, Text, theme};
-use frame::window::{Event, Pointer, Rect, Window};
+use frame::window::{Canvas, Event, Pointer, Rect, Window};
 use frame::wl::Error;
 use frame::wl::proto::{cursor_shape, pointer};
 
@@ -15,6 +17,9 @@ use crate::view::View;
 
 /// Longest step a spring takes after a stall, s (no jumps after a hiccup).
 const MAX_DT: f32 = 0.05;
+/// linux/input-event-codes.h: the mouse side buttons.
+const BTN_SIDE: u32 = 0x113;
+const BTN_EXTRA: u32 = 0x114;
 
 struct App {
     win: Window,
@@ -22,23 +27,34 @@ struct App {
     view: View,
     browser: Browser,
     last: Instant,
+    /// The folder the window title names.
+    titled: PathBuf,
+    /// Live refresh: inotify on the folder in `watching`.
+    watch: Option<Watch>,
+    watching: PathBuf,
 }
 
-/// Open the window on the folder given as the first argument, else the current one.
+/// Open the window on the folder given as the first argument, else home (like
+/// Nemo; `files .` for here). `--png` renders headless instead (see [`shot`]).
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let start = match std::env::args_os().nth(1) {
-        Some(p) => PathBuf::from(p),
-        None => std::env::current_dir()?,
-    };
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.iter().any(|a| a == "--png") {
+        return shot(&args);
+    }
+    let start = args.first().map_or_else(crate::view::home, PathBuf::from);
     let mut win: Window = Window::new("files", "files", true)?;
     let (w, h) = win.configured_size();
     win.set_size(if w == 0 { 720 } else { w }, if h == 0 { 560 } else { h });
     let mut app = App {
         win,
         ui: State::new(Text::new(theme::FAMILY)?),
-        view: View::default(),
-        browser: Browser::new(std::fs::canonicalize(&start)?),
+        view: View::new(),
+        // A folder we can't resolve still opens: Browser falls back and shows why.
+        browser: Browser::new(std::fs::canonicalize(&start).unwrap_or(start)),
         last: Instant::now(),
+        titled: PathBuf::new(),
+        watch: None,
+        watching: PathBuf::new(),
     };
     app.run()?;
     Ok(())
@@ -57,7 +73,12 @@ impl App {
             if (dirty || self.ui.animating()) && !self.win.frame_pending() && self.draw()? {
                 dirty = false;
             }
-            self.wait()?;
+            // Keys handled while drawing can ask to quit. Leave now: a hidden window gets no
+            // frame callback, so wait could sleep until some unrelated event.
+            if self.view.quit {
+                return Ok(());
+            }
+            dirty |= self.wait()?;
         }
     }
 
@@ -73,22 +94,49 @@ impl App {
                 i.button(pressed);
             }
             Event::Pointer(Pointer::Scroll { discrete, px }) => self.view.scroll_by(discrete, px),
+            // Mouse side buttons: back / forward, like Nemo.
+            Event::Pointer(Pointer::Button {
+                button: BTN_SIDE,
+                pressed: true,
+            }) => self.browser.travel(true),
+            Event::Pointer(Pointer::Button {
+                button: BTN_EXTRA,
+                pressed: true,
+            }) => self.browser.travel(false),
             _ => return false,
         }
         true
     }
 
     /// Sleep until the compositor sends something (a frame callback while animating).
-    fn wait(&mut self) -> Result<(), Error> {
+    /// Also wakes when the shown folder changes on disk; then it is read again
+    /// and this returns true (needs a redraw).
+    fn wait(&mut self) -> Result<bool, Error> {
         self.win.flush()?;
+        if self.watching != self.browser.cwd {
+            self.watching.clone_from(&self.browser.cwd);
+            // shortcut: no live refresh where inotify fails (some network mounts).
+            self.watch = Watch::new(&[&self.watching]).ok();
+        }
         let timeout = self.win.next_deadline().map_or(-1, |at| {
             at.saturating_duration_since(Instant::now()).as_millis() as i32
         });
-        let mut fds = [PollFd::new(self.win.fd(), POLLIN)];
+        let mut fds = vec![PollFd::new(self.win.fd(), POLLIN)];
+        if let Some(w) = &self.watch {
+            fds.push(PollFd::new(w.fd(), POLLIN));
+        }
         sys::wait(&mut fds, timeout)?;
+        let changed = fds.get(1).is_some_and(|f| f.ready(POLLIN));
+        drop(fds);
         self.win.dispatch()?;
         self.win.tick(Instant::now());
-        Ok(())
+        if changed && self.watch.as_mut().is_some_and(Watch::drain) {
+            self.browser.reload();
+            // Re-arm: if the folder was removed and made again, the old watch is dead.
+            self.watching.clear();
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Draw a full frame into a free buffer. False if none is free yet.
@@ -121,6 +169,54 @@ impl App {
             cursor_shape::SHAPE_DEFAULT
         };
         self.win.set_cursor(shape)?;
+        if self.titled != self.browser.cwd {
+            self.titled.clone_from(&self.browser.cwd);
+            let name = self
+                .titled
+                .file_name()
+                .map_or("/".into(), |n| n.to_string_lossy());
+            self.win.set_title(&name)?;
+        }
         Ok(true)
     }
+}
+
+/// Render settled frames into a PNG, no compositor needed, for checking the look:
+/// `files --png out.png [--size WxH] [--grid] [--select N] [--pointer X,Y] [folder]`.
+fn shot(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<&str> = args.iter().filter_map(|a| a.to_str()).collect();
+    let val = |f: &str| {
+        args.iter()
+            .position(|a| *a == f)
+            .and_then(|i| args.get(i + 1).copied())
+    };
+    let pair = |f: &str, sep: char| -> Option<(f32, f32)> {
+        let (a, b) = val(f)?.split_once(sep)?;
+        Some((a.parse().ok()?, b.parse().ok()?))
+    };
+    let (w, h) = pair("--size", 'x').unwrap_or((960.0, 600.0));
+    let (w, h) = (w as usize, h as usize);
+    // The folder is the one argument that is neither a flag nor a flag's value.
+    let takes_value = ["--png", "--size", "--select", "--pointer"];
+    let folder = args
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| !a.starts_with("--") && (*i == 0 || !takes_value.contains(&args[i - 1])))
+        .map(|(_, a)| PathBuf::from(a))
+        .next_back()
+        .unwrap_or_else(crate::view::home);
+    let mut browser = Browser::new(std::fs::canonicalize(&folder).unwrap_or(folder));
+    browser.sel = val("--select").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let mut view = View::new();
+    view.set_grid(args.contains(&"--grid"));
+    let mut ui = State::new(Text::new(theme::FAMILY)?);
+    ui.input.pos = pair("--pointer", ',').unwrap_or((-1.0, -1.0));
+    let mut px = vec![0u32; w * h];
+    for _ in 0..40 {
+        let mut f = ui.begin(Canvas { px: &mut px, w, h }, MAX_DT);
+        view.draw(&mut f, &mut browser);
+        f.end();
+    }
+    frame::png::write(val("--png").unwrap_or("files.png"), w, h, &px)?;
+    Ok(())
 }
