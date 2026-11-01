@@ -19,7 +19,7 @@ pub fn run() -> Result<(), Error> {
         fds.clear();
         fds.push(PollFd::new(conn.fd(), POLLIN));
         keeper.poll_set(&mut fds);
-        sys::wait(&mut fds)?;
+        sys::wait(&mut fds, keeper.timeout_ms())?;
         if fds[0].revents != 0 {
             conn.read()?;
         }
@@ -67,7 +67,7 @@ fn bind_globals(conn: &mut Conn) -> Result<(u32, u32), Error> {
     let mut synced = false;
     while !synced {
         conn.flush()?;
-        sys::wait(&mut [PollFd::new(conn.fd(), POLLIN)])?;
+        sys::wait(&mut [PollFd::new(conn.fd(), POLLIN)], -1)?;
         conn.read()?;
         while let Some(ev) = conn.next_event()? {
             synced |= ev.obj == done;

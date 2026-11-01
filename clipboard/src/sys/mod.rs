@@ -52,10 +52,11 @@ impl PollFd {
     }
 }
 
-/// Sleep until one of `fds` is ready (no timeout). EINTR counts as "woke up".
-pub fn wait(fds: &mut [PollFd]) -> io::Result<()> {
+/// Sleep until one of `fds` is ready or `timeout_ms` passes (-1 = never). EINTR
+/// counts as "woke up".
+pub fn wait(fds: &mut [PollFd], timeout_ms: i32) -> io::Result<()> {
     // SAFETY: `fds` is a valid, exclusively borrowed array of pollfd.
-    match check(unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, -1) }) {
+    match check(unsafe { poll(fds.as_mut_ptr(), fds.len() as u64, timeout_ms) }) {
         Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(()),
         r => r.map(|_| ()),
     }

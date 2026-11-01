@@ -1,10 +1,12 @@
-//! The clipboard state machine. Every text copy is read in at once; when the
-//! selection goes empty (the copying app closed), we offer the kept copy ourselves.
+//! The clipboard state machine. Every copy's text and image are read in at once;
+//! when the selection goes empty (the copying app closed), we offer them ourselves.
 
+use std::io;
 use std::os::fd::AsFd;
 use std::rc::Rc;
+use std::time::Instant;
 
-use crate::pipes::{Kept, Reader, Writer};
+use crate::pipes::{Kept, Reader, STALL, Writer};
 use crate::sys::{self, POLLIN, POLLOUT, PollFd};
 use crate::wl::proto::{device, manager, offer, source};
 use crate::wl::{Arg, Conn, Error, Event};
@@ -17,6 +19,8 @@ pub const TEXT: [&str; 5] = [
     "STRING",
     "TEXT",
 ];
+/// The image type nearly every app pastes; preferred over any other image type.
+const PNG: &str = "image/png";
 /// Our own sources carry this, so we can tell them apart from real copies.
 const MARKER: &str = "application/x-clip-keeper";
 /// Password managers mark secrets with this (KeePassXC, KDE); never keep those.
@@ -26,11 +30,13 @@ const SECRET: &str = "x-kde-passwordManagerHint";
 const MAX_WRITERS: usize = 256;
 
 /// What one data offer advertises, as far as we care.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct Offer {
     id: u32,
     /// Index into TEXT of the best text type offered; TEXT.len() = none.
     best: usize,
+    /// PNG if offered, else the first image type.
+    image: Option<String>,
     ours: bool,
     secret: bool,
 }
@@ -41,6 +47,7 @@ impl Offer {
         Self {
             id,
             best,
+            image: None,
             ours: false,
             secret: false,
         }
@@ -50,6 +57,11 @@ impl Offer {
         match mime {
             MARKER => self.ours = true,
             SECRET => self.secret = true,
+            m if m.starts_with("image/") => {
+                if self.image.is_none() || m == PNG {
+                    self.image = Some(m.to_owned());
+                }
+            }
             m => {
                 let rank = TEXT.iter().position(|t| *t == m).unwrap_or(TEXT.len());
                 self.best = self.best.min(rank);
@@ -57,10 +69,13 @@ impl Offer {
         }
     }
 
-    /// The text type to read, if this is a copy we should keep.
-    pub fn wanted(&self) -> Option<&'static str> {
-        let keep = !self.ours && !self.secret;
-        TEXT.get(self.best).copied().filter(|_| keep)
+    /// The types to read (best text, then the image), if this is a copy to keep.
+    pub fn wanted(&self) -> Vec<&str> {
+        if self.ours || self.secret {
+            return Vec::new();
+        }
+        let text = TEXT.get(self.best).copied();
+        text.into_iter().chain(self.image.as_deref()).collect()
     }
 }
 
@@ -69,13 +84,14 @@ pub struct Keeper {
     device: u32,
     /// Offers announced but not yet tied to a selection.
     offers: Vec<Offer>,
-    /// The last text copy, if it is still the right thing to paste.
-    data: Option<Rc<Kept>>,
+    /// The last copy as (type we serve it as, bytes); empty = nothing to paste.
+    data: Vec<(String, Rc<Kept>)>,
     /// Our live source while we own the selection.
     source: Option<u32>,
     /// The selection is currently empty.
     empty: bool,
-    reader: Option<Reader>,
+    /// Parts of the last copy still coming in: (type asked for, reader).
+    readers: Vec<(String, Reader)>,
     writers: Vec<Writer>,
 }
 
@@ -85,17 +101,21 @@ impl Keeper {
             manager,
             device,
             offers: Vec::new(),
-            data: None,
+            data: Vec::new(),
             source: None,
             empty: false,
-            reader: None,
+            readers: Vec::new(),
             writers: Vec::new(),
         }
     }
 
     /// The pipes we wait on, after the Wayland socket.
     pub fn poll_set(&self, fds: &mut Vec<PollFd>) {
-        fds.extend(self.reader.iter().map(|r| PollFd::new(r.fd(), POLLIN)));
+        fds.extend(
+            self.readers
+                .iter()
+                .map(|(_, r)| PollFd::new(r.fd(), POLLIN)),
+        );
         fds.extend(self.writers.iter().map(|w| PollFd::new(w.fd(), POLLOUT)));
     }
 
@@ -116,7 +136,12 @@ impl Keeper {
             }
         } else if Some(ev.obj) == self.source {
             match ev.op {
-                source::EV_SEND => self.serve(args.str()?, conn.take_fd()?),
+                source::EV_SEND => {
+                    let fd = conn.take_fd()?; // first: it is queued whatever the mime says
+                    if let Ok(mime) = args.str() {
+                        self.serve(mime, fd); // a non-UTF-8 mime gets an empty paste
+                    }
+                }
                 source::EV_CANCELLED => {
                     conn.send(ev.obj, source::DESTROY, &[])?;
                     self.source = None;
@@ -125,29 +150,63 @@ impl Keeper {
             }
         } else if ev.op == offer::EV_OFFER
             && let Some(o) = self.offers.iter_mut().find(|o| o.id == ev.obj)
+            && let Ok(mime) = args.str()
         {
-            o.add_mime(args.str()?);
+            o.add_mime(mime); // a non-UTF-8 mime from some app is skipped, not fatal
         }
         Ok(())
     }
 
+    /// How long poll may sleep: forever, unless a copy is still coming in.
+    pub fn timeout_ms(&self) -> i32 {
+        let Some(next) = self.readers.iter().map(|(_, r)| r.deadline()).min() else {
+            return -1;
+        };
+        let left = next.saturating_duration_since(Instant::now()).as_millis();
+        i32::try_from(left).unwrap_or(i32::MAX).saturating_add(1) // wake just after it
+    }
+
     /// Move pipe transfers along; call after every wakeup.
+    /// shortcut: steps every transfer, not only ready ones; fine until hundreds of
+    /// pastes are stuck at once.
     pub fn pump(&mut self, conn: &mut Conn) -> Result<(), Error> {
-        if let Some(reader) = &mut self.reader {
-            match reader.step() {
-                Ok(false) => {}
-                Ok(true) => {
-                    self.data = self.reader.take().and_then(Reader::finish).map(Rc::new);
-                    self.take_over(conn)?;
-                }
-                Err(e) => {
-                    eprintln!("clip: reading a copy failed: {e}");
-                    self.reader = None;
-                }
+        let now = Instant::now();
+        let mut i = 0;
+        while i < self.readers.len() {
+            let step = self.readers[i].1.step();
+            let stalled = self.readers[i].1.deadline() <= now;
+            if matches!(step, Ok(false)) && !stalled {
+                i += 1;
+                continue;
+            }
+            let (mime, reader) = self.readers.swap_remove(i);
+            match step {
+                Ok(true) => self.keep(&mime, reader),
+                Ok(false) => eprintln!("clip: gave up on {mime}: no data for {STALL:?}"),
+                Err(e) => eprintln!("clip: reading {mime} failed: {e}"),
             }
         }
-        self.writers.retain_mut(|w| matches!(w.step(), Ok(false)));
-        Ok(())
+        self.writers.retain_mut(|w| match w.step() {
+            Ok(done) => !done,
+            Err(e) => {
+                if e.kind() != io::ErrorKind::BrokenPipe {
+                    eprintln!("clip: a paste failed: {e}"); // the app closing early is normal
+                }
+                false
+            }
+        });
+        self.take_over(conn) // the selection may have emptied while we read
+    }
+
+    /// Store a finished part under every type it can be pasted as.
+    fn keep(&mut self, mime: &str, reader: Reader) {
+        let Some(kept) = reader.finish() else {
+            return;
+        };
+        let kept = Rc::new(kept);
+        let names: &[&str] = if TEXT.contains(&mime) { &TEXT } else { &[mime] };
+        let parts = names.iter().map(|n| (n.to_string(), kept.clone()));
+        self.data.extend(parts);
     }
 
     fn selection(&mut self, conn: &mut Conn, id: u32) -> Result<(), Error> {
@@ -160,14 +219,14 @@ impl Keeper {
         };
         if !offer.ours {
             // A new copy: what we kept is stale now, even if we can't keep this one.
-            self.data = None;
-            self.reader = None;
+            self.data.clear();
+            self.readers.clear();
         }
-        if let Some(mime) = offer.wanted() {
+        for mime in offer.wanted() {
             let (r, w) = sys::pipe()?;
             conn.send(id, offer::RECEIVE, &[Arg::S(mime), Arg::Fd(w.as_fd())])?;
             drop(w); // the app holds its own copy; ours would hide EOF
-            self.reader = Some(Reader::new(r)?);
+            self.readers.push((mime.to_owned(), Reader::new(r)?));
         }
         conn.send(id, offer::DESTROY, &[]) // the transfer goes on without it
     }
@@ -180,25 +239,27 @@ impl Keeper {
 
     /// Own the selection with the kept copy, if it is empty and we have one.
     fn take_over(&mut self, conn: &mut Conn) -> Result<(), Error> {
-        let busy = self.source.is_some() || self.reader.is_some();
-        if !self.empty || busy || self.data.is_none() {
+        let busy = self.source.is_some() || !self.readers.is_empty();
+        if !self.empty || busy || self.data.is_empty() {
             return Ok(());
         }
         let id = conn.new_id();
         conn.send(self.manager, manager::CREATE_DATA_SOURCE, &[Arg::U(id)])?;
-        for mime in TEXT.iter().chain([&MARKER]) {
+        for mime in self.data.iter().map(|(m, _)| m.as_str()).chain([MARKER]) {
             conn.send(id, source::OFFER, &[Arg::S(mime)])?;
         }
         conn.send(self.device, device::SET_SELECTION, &[Arg::U(id)])?;
         self.source = Some(id);
+        self.empty = false; // until the compositor says so; a stale true would re-take
         Ok(())
     }
 
-    /// A paste asked for our copy: start writing it (the marker type gets nothing).
+    /// A paste asked for a type of our copy: start writing it.
     fn serve(&mut self, mime: &str, fd: std::os::fd::OwnedFd) {
-        let Some(data) = self.data.clone().filter(|_| mime != MARKER) else {
-            return; // dropping fd closes the pipe: an empty paste
+        let Some((_, data)) = self.data.iter().find(|(m, _)| m == mime) else {
+            return; // the marker or an unknown type: dropping fd = an empty paste
         };
+        let data = data.clone();
         if self.writers.len() >= MAX_WRITERS {
             self.writers.remove(0);
         }
@@ -222,17 +283,50 @@ mod tests {
     #[test]
     fn picks_the_best_text_type() {
         let o = offer(&["text/html", "STRING", "text/plain;charset=utf-8", "TEXT"]);
-        assert_eq!(o.wanted(), Some("text/plain;charset=utf-8"));
-        assert_eq!(
-            offer(&["TEXT", "UTF8_STRING"]).wanted(),
-            Some("UTF8_STRING")
-        );
+        assert_eq!(o.wanted(), ["text/plain;charset=utf-8"]);
+        assert_eq!(offer(&["TEXT", "UTF8_STRING"]).wanted(), ["UTF8_STRING"]);
     }
 
     #[test]
-    fn skips_images_secrets_and_our_own() {
-        assert_eq!(offer(&["image/png"]).wanted(), None);
-        assert_eq!(offer(&["text/plain", SECRET]).wanted(), None);
-        assert_eq!(offer(&["text/plain", MARKER]).wanted(), None);
+    fn picks_png_else_the_first_image() {
+        let o = offer(&["image/jpeg", "text/plain", PNG, "image/bmp"]);
+        assert_eq!(o.wanted(), ["text/plain", PNG]);
+        assert_eq!(offer(&["image/webp", "image/bmp"]).wanted(), ["image/webp"]);
+    }
+
+    #[test]
+    fn skips_other_types_secrets_and_our_own() {
+        assert!(offer(&["text/html", "application/pdf"]).wanted().is_empty());
+        assert!(offer(&["text/plain", PNG, SECRET]).wanted().is_empty());
+        assert!(offer(&["text/plain", PNG, MARKER]).wanted().is_empty());
+    }
+
+    fn finished_reader(bytes: &[u8]) -> Reader {
+        use std::io::Write;
+        let (r, w) = sys::pipe().unwrap();
+        std::fs::File::from(w).write_all(bytes).unwrap();
+        let mut reader = Reader::new(r).unwrap();
+        assert!(reader.step().unwrap());
+        reader
+    }
+
+    #[test]
+    fn keeps_text_under_every_text_name_and_images_as_is() {
+        let mut k = Keeper::new(2, 3);
+        k.keep("UTF8_STRING", finished_reader(b"hi"));
+        k.keep(PNG, finished_reader(b"\x89PNG"));
+        k.keep("image/jpeg", finished_reader(b"")); // empty part: not kept
+        let names: Vec<&str> = k.data.iter().map(|(m, _)| m.as_str()).collect();
+        assert_eq!(names, [TEXT.as_slice(), &[PNG]].concat());
+    }
+
+    #[test]
+    fn sleeps_forever_unless_a_copy_is_coming_in() {
+        let mut k = Keeper::new(2, 3);
+        assert_eq!(k.timeout_ms(), -1);
+        let (r, _w) = sys::pipe().unwrap();
+        k.readers.push((PNG.into(), Reader::new(r).unwrap()));
+        let ms = k.timeout_ms();
+        assert!(ms > 9_000 && ms <= STALL.as_millis() as i32 + 1, "{ms}");
     }
 }

@@ -58,7 +58,6 @@ impl From<io::Error> for Error {
 /// One request argument.
 pub enum Arg<'a> {
     U(u32),
-    I(i32),
     S(&'a str),
     Fd(BorrowedFd<'a>),
 }
@@ -111,7 +110,7 @@ impl Conn {
     }
 
     /// A client-side object id: a freed one if any, else a new one. Reuse matters:
-    /// one frame callback per frame would hit the 0xff000000 limit in days.
+    /// ids must stay below 0xff000000, and a long-running daemon makes many sources.
     pub fn new_id(&mut self) -> u32 {
         if let Some(id) = self.free.pop() {
             return id;
@@ -135,7 +134,6 @@ impl Conn {
         for arg in args {
             match arg {
                 Arg::U(v) => self.out.extend_from_slice(&v.to_ne_bytes()),
-                Arg::I(v) => self.out.extend_from_slice(&v.to_ne_bytes()),
                 Arg::S(s) => put_str(&mut self.out, s),
                 Arg::Fd(f) => fd = Some(f.as_raw_fd()),
             }
@@ -149,6 +147,8 @@ impl Conn {
         }
     }
 
+    /// shortcut: blocking write; a compositor that stops reading stalls us. Our
+    /// requests are a few hundred bytes per copy, so it never fills the socket.
     pub fn flush(&mut self) -> Result<(), Error> {
         self.sock.write_all(&self.out)?;
         self.out.clear();

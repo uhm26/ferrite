@@ -7,7 +7,7 @@ pub mod wire;
 pub use wire::{Arg, Conn, Error, Event};
 
 /// A global the compositor announced (wl_registry.global).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Global {
     pub name: u32,
     pub interface: String,

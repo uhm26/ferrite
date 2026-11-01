@@ -51,7 +51,22 @@ pub fn pipe_to_file(
     checked(unsafe { splice(i, null, o, off, len, SPLICE_F_NONBLOCK) })
 }
 
-/// Send up to `len` bytes of `file` from `*off` (advanced) to `out`, any kind of fd.
+/// Move up to `len` bytes of `file` from `*off` (advanced) into `pipe`. Never blocks,
+/// without setting O_NONBLOCK on the pipe (that flag is shared with the app).
+pub fn file_to_pipe(
+    file: BorrowedFd,
+    pipe: BorrowedFd,
+    off: &mut i64,
+    len: usize,
+) -> io::Result<usize> {
+    let (i, o) = (file.as_raw_fd(), pipe.as_raw_fd());
+    let null = std::ptr::null_mut();
+    // SAFETY: `off` is a valid, exclusive i64 for the call; fds are borrowed and open.
+    checked(unsafe { splice(i, off, o, null, len, SPLICE_F_NONBLOCK) })
+}
+
+/// Send up to `len` bytes of `file` from `*off` (advanced) to a non-pipe `out`
+/// (socket, file). Fails with EINVAL on O_APPEND files.
 pub fn file_to_fd(
     file: BorrowedFd,
     out: BorrowedFd,
