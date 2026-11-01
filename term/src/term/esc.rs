@@ -7,7 +7,7 @@ use crate::color;
 impl Term {
     pub(super) fn control(&mut self, byte: u8) {
         match byte {
-            0x07 => self.bell = true,
+            0x07 => {} // bell: ignored
             0x08 => self.backspace(),
             0x09 => self.tab(1),
             0x0a..=0x0c => {

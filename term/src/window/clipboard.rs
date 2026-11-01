@@ -41,25 +41,42 @@ impl Clipboard {
 }
 
 impl Window {
+    /// The clipboard holds an image and no text.
+    pub fn clipboard_is_image(&self) -> bool {
+        let sel = self.clip.selection;
+        self.clip.offers.iter().find(|(id, _)| *id == sel).is_some_and(|(_, mimes)| {
+            let any = |p: fn(&str) -> bool| mimes.iter().any(|m| p(m));
+            any(|m| m.starts_with("image/")) && !any(|m| MIMES.contains(&m))
+        })
+    }
+
     /// Ask for the clipboard as text. Returns the pipe to read it from.
-    pub fn paste(&mut self) -> Result<Option<OwnedFd>, Error> {
+    /// With `image`, asks for the image (PNG preferred) instead. Returns the pipe and the
+    /// mime type it will carry.
+    pub fn paste(&mut self, image: bool) -> Result<Option<(OwnedFd, String)>, Error> {
         let sel = self.clip.selection;
         let Some((_, mimes)) = self.clip.offers.iter().find(|(id, _)| *id == sel) else {
             return Ok(None);
         };
-        let Some(mime) = MIMES.iter().find(|m| mimes.iter().any(|x| x == *m)) else {
+        let mime = if image {
+            let png = mimes.iter().find(|m| *m == "image/png");
+            png.or_else(|| mimes.iter().find(|m| m.starts_with("image/"))).cloned()
+        } else {
+            MIMES.iter().find(|m| mimes.iter().any(|x| x == *m)).map(|m| m.to_string())
+        };
+        let Some(mime) = mime else {
             return Ok(None);
         };
+        let mime_arg = mime.clone();
         let (read, write) = sys::pipe()?;
         self.conn.send(
             sel,
             data_offer::RECEIVE,
-            &[Arg::S(mime), Arg::Fd(write.as_fd())],
-        )?;
-        self.conn.flush()?;
+            &[Arg::S(&mime_arg), Arg::Fd(write.as_fd())],
+        )?; // sending an fd flushes at once
         drop(write); // the sender holds its copy; EOF comes when it is done
         sys::set_nonblocking(read.as_fd())?;
-        Ok(Some(read))
+        Ok(Some((read, mime)))
     }
 
     /// Put `text` on the clipboard.
@@ -123,9 +140,7 @@ impl Window {
                 let fd = self.conn.take_fd()?;
                 let text = Arc::clone(&self.clip.text);
                 // A slow reader must not stall the terminal: write from a thread.
-                std::thread::spawn(move || {
-                    let _ = std::fs::File::from(fd).write_all(&text);
-                });
+                std::thread::spawn(move || send_all(fd, &text));
             }
             data_source::EV_CANCELLED => {
                 self.conn.send(ev.obj, data_source::DESTROY, &[])?;
@@ -135,5 +150,45 @@ impl Window {
             _ => {}
         }
         Ok(())
+    }
+}
+
+/// Write `text` to a paste reader, giving up after 5 s without progress: a reader
+/// that stops reading must not keep this thread and the pipe alive forever.
+fn send_all(fd: OwnedFd, text: &[u8]) {
+    if sys::set_nonblocking(fd.as_fd()).is_err() {
+        return;
+    }
+    let mut f = std::fs::File::from(fd);
+    let mut rest = text;
+    while !rest.is_empty() {
+        match f.write(rest) {
+            Ok(n) => rest = &rest[n..],
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                let mut p = [sys::PollFd::new(f.as_fd(), sys::POLLOUT)];
+                if sys::wait(&mut p, 5000).is_err() || !p[0].ready(sys::POLLOUT) {
+                    return;
+                }
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    #[test]
+    fn send_all_delivers_more_than_a_pipe_holds() {
+        let (read, write) = crate::sys::pipe().unwrap();
+        let text: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
+        let reader = std::thread::spawn(move || {
+            let mut got = Vec::new();
+            std::fs::File::from(read).read_to_end(&mut got).unwrap();
+            got
+        });
+        super::send_all(write, &text);
+        assert_eq!(reader.join().unwrap(), text);
     }
 }

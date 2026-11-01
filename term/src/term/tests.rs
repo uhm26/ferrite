@@ -143,3 +143,12 @@ fn no_autowrap_overwrites_last_column() {
     t.feed(b"\x1b[?7labcdef");
     assert_eq!(line(&t, 0), "abf");
 }
+
+#[test]
+fn resetting_another_mouse_mode_keeps_tracking() {
+    let mut t = term(10, 3);
+    t.feed(b"\x1b[?1002h\x1b[?1003l");
+    assert_eq!(t.modes.mouse, Mouse::Drag);
+    t.feed(b"\x1b[?1002l");
+    assert_eq!(t.modes.mouse, Mouse::Off);
+}

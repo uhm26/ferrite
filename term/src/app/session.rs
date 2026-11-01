@@ -75,7 +75,6 @@ impl Session {
             let r = std::mem::take(&mut self.term.replies);
             self.pty.write(&r);
         }
-        self.term.bell = false;
         match (self.term.modes.sync, self.sync_since) {
             (true, None) => self.sync_since = Some(Instant::now()),
             (false, Some(_)) => self.sync_since = None,

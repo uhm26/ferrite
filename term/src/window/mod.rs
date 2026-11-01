@@ -6,7 +6,7 @@ mod buffers;
 mod clipboard;
 mod input;
 
-pub use buffers::Buffer;
+use buffers::Buffer;
 pub use input::Pointer;
 
 use std::collections::VecDeque;
@@ -22,10 +22,6 @@ pub enum Event {
     /// The compositor chose a size (already acknowledged).
     Resize(usize, usize),
     Close,
-    /// The last frame was shown; drawing again is welcome.
-    Frame,
-    /// A buffer came back; a pending draw may proceed.
-    Released,
     Key(Key),
     Focus(bool),
     Pointer(Pointer),
@@ -101,26 +97,20 @@ impl Window {
         let globals = std::mem::take(&mut self.globals);
         let reg = self.ids.registry;
         for g in &globals {
-            let max = match g.interface.as_str() {
-                "wl_compositor" => 4,
-                "wl_shm" => 1,
-                "xdg_wm_base" => 2,
-                "wl_seat" => 7, // 8 replaces axis_discrete with axis_value120
-                "wl_data_device_manager" => 3,
-                "wp_cursor_shape_manager_v1" => 1,
+            let ids = &mut self.ids;
+            let (max, slot) = match g.interface.as_str() {
+                // v4 is needed (damage_buffer); an older one stays unbound -> Missing.
+                "wl_compositor" if g.version >= 4 => (4, &mut ids.compositor),
+                "wl_shm" => (1, &mut ids.shm),
+                "xdg_wm_base" => (2, &mut ids.wm_base),
+                "wl_seat" => (7, &mut ids.seat), // 8 replaces axis_discrete with value120
+                "wl_data_device_manager" => (3, &mut ids.ddm),
+                "wp_cursor_shape_manager_v1" => (1, &mut ids.cursor_shape),
                 _ => continue,
             };
-            let id = self.conn.bind(reg, g, max)?;
-            let slot = match g.interface.as_str() {
-                "wl_compositor" => &mut self.ids.compositor,
-                "wl_shm" => &mut self.ids.shm,
-                "xdg_wm_base" => &mut self.ids.wm_base,
-                "wl_seat" => &mut self.ids.seat,
-                "wl_data_device_manager" => &mut self.ids.ddm,
-                _ => &mut self.ids.cursor_shape,
-            };
+            // The first of each wins; binding a second (another seat) would leak it.
             if *slot == 0 {
-                *slot = id;
+                *slot = self.conn.bind(reg, g, max)?;
             }
         }
         for (id, name) in [
@@ -213,8 +203,7 @@ impl Window {
             }
             (o, callback::EV_DONE) if o == self.sync_cb => self.sync_cb = 0,
             (o, callback::EV_DONE) if Some(o) == self.frame_cb => {
-                self.frame_cb = None;
-                self.events.push_back(Event::Frame);
+                self.frame_cb = None; // the loop draws again this same turn
             }
             (o, wm_base::EV_PING) if o == self.ids.wm_base => {
                 let serial = a.u32()?;
@@ -228,8 +217,7 @@ impl Window {
 
     fn handle_other(&mut self, ev: &WlEvent) -> Result<(), Error> {
         if self.on_buffer(ev) {
-            self.events.push_back(Event::Released);
-            return Ok(());
+            return Ok(()); // a freed buffer: the loop's draw this turn can use it
         }
         if self.on_input(ev)? {
             return Ok(());

@@ -115,11 +115,15 @@ impl Pty {
     }
 
     /// Keep the shell alive through an exec: the pty stays open across it and the
-    /// shell is not killed. Returns the fd number and the shell's pid.
-    pub fn hand_over(self) -> io::Result<(RawFd, u32)> {
-        sys::set_cloexec(self.master.as_fd(), false)?;
+    /// shell is not killed. Returns the fd number and the shell's pid. Never fails:
+    /// if close-on-exec can't be cleared, that one tab is lost at exec (its shell
+    /// gets a hangup) instead of the restart aborting with half the tabs handed over.
+    pub fn hand_over(self) -> (RawFd, u32) {
+        if let Err(e) = sys::set_cloexec(self.master.as_fd(), false) {
+            eprintln!("term: a tab won't survive the restart: {e}");
+        }
         let this = std::mem::ManuallyDrop::new(self);
-        Ok((this.master.as_raw_fd(), this.pid))
+        (this.master.as_raw_fd(), this.pid)
     }
 
     pub fn fd(&self) -> BorrowedFd<'_> {

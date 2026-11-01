@@ -23,7 +23,10 @@ impl Term {
             if i + 1 == rows.len() {
                 break;
             }
-            if r.wrapped {
+            // A row can keep its wrap mark after the row below was erased: then a plain
+            // line break is right, or the replay would merge them and shift every row.
+            let next_has_text = rows[i + 1].cells.iter().any(|c| *c != Cell::BLANK);
+            if r.wrapped && next_has_text {
                 // Fill to the edge so the replay wraps here too (and marks the row).
                 let cells = &r.cells[..r.cells.len().min(self.cols)];
                 let used = cells.iter().rposition(|c| *c != Cell::BLANK).map_or(0, |i| i + 1);
@@ -214,6 +217,11 @@ mod tests {
     #[test]
     fn wrapped_wide_and_cursor() {
         roundtrip("abcdefghijklmnop 漢字 x\x1b[2;3H".as_bytes());
+    }
+
+    #[test]
+    fn wrapped_row_whose_next_row_was_erased() {
+        roundtrip(b"aaaaaaaaaaaab\x1b[2;1H\x1b[2K\x1b[3;1Hthird\r\nfourth");
     }
 
     #[test]

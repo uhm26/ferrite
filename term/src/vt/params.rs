@@ -1,7 +1,7 @@
 //! CSI parameters: numbers split by `;`, with `:` sub-parameters (SGR 4:3, 38:2::r:g:b).
 
 /// More parameters than this are dropped (the sequence still runs).
-pub const MAX: usize = 32;
+const MAX: usize = 32;
 
 #[derive(Default, Clone)]
 pub struct Params {
@@ -11,10 +11,13 @@ pub struct Params {
     len: usize,
     /// A digit was seen for the value being built.
     open: bool,
+    /// More than MAX values came: the rest are ignored.
+    overflow: bool,
 }
 
 impl Params {
     pub fn clear(&mut self) {
+        self.overflow = false;
         self.len = 0;
         self.sub = 0;
         self.open = false;
@@ -23,6 +26,9 @@ impl Params {
     pub fn digit(&mut self, d: u8) {
         if !self.open {
             self.push(false);
+        }
+        if self.overflow {
+            return; // past MAX values: dropped, never glued onto the last one
         }
         if let Some(v) = self.vals.get_mut(self.len.wrapping_sub(1)) {
             *v = v.saturating_mul(10).saturating_add(u16::from(d - b'0'));
@@ -43,6 +49,7 @@ impl Params {
     }
 
     fn push(&mut self, sub: bool) {
+        self.overflow = self.len == MAX;
         if self.len < MAX {
             self.vals[self.len] = 0;
             if sub {

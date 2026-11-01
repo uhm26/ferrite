@@ -142,11 +142,26 @@ impl Term {
                 m.origin = on;
                 self.goto(0, 0);
             }
-            7 => m.autowrap = on,
+            7 => {
+                m.autowrap = on;
+                if !on {
+                    self.cursor.pending_wrap = false; // no wrap is owed any more
+                }
+            }
             25 => m.show_cursor = on,
-            1000 => m.mouse = if on { Mouse::Click } else { Mouse::Off },
-            1002 => m.mouse = if on { Mouse::Drag } else { Mouse::Off },
-            1003 => m.mouse = if on { Mouse::Motion } else { Mouse::Off },
+            1000 | 1002 | 1003 => {
+                let want = match mode {
+                    1000 => Mouse::Click,
+                    1002 => Mouse::Drag,
+                    _ => Mouse::Motion,
+                };
+                // Resetting a mode that isn't the active one leaves tracking alone.
+                if on {
+                    m.mouse = want;
+                } else if m.mouse == want {
+                    m.mouse = Mouse::Off;
+                }
+            }
             1004 => m.focus_events = on,
             1006 => m.mouse_sgr = on,
             1007 => m.alt_scroll = on,

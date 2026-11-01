@@ -110,13 +110,15 @@ fn xterm256(i: u8) -> u32 {
 /// X color spec: `#rrggbb` or `rgb:r/g/b` (1-4 hex digits each).
 pub fn parse(spec: &str) -> Option<u32> {
     if let Some(hex) = spec.strip_prefix('#') {
-        return (hex.len() == 6)
-            .then(|| u32::from_str_radix(hex, 16).ok())
-            .flatten();
+        let ok = hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit());
+        return ok.then(|| u32::from_str_radix(hex, 16).ok()).flatten();
     }
     let parts: Vec<&str> = spec.strip_prefix("rgb:")?.split('/').collect();
     let [r, g, b] = parts[..] else { return None };
     let chan = |s: &str| -> Option<u32> {
+        if !(1..=4).contains(&s.len()) || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None; // more digits would spill into the next channel
+        }
         let v = u32::from_str_radix(s, 16).ok()?;
         let max = (1u32 << (4 * s.len().clamp(1, 4))) - 1;
         Some(v * 255 / max)
@@ -157,6 +159,8 @@ mod tests {
         assert_eq!(parse("rgb:ff/80/00"), Some(0xff8000));
         assert_eq!(parse("rgb:ffff/0000/8080"), Some(0xff0080));
         assert_eq!(parse("nope"), None);
+        assert_eq!(parse("rgb:fffff/0/0"), None); // 5 digits would spill over
+        assert_eq!(parse("#+fffff"), None);
         assert_eq!(spec(0x0d0d0d), "rgb:0d0d/0d0d/0d0d");
     }
 }

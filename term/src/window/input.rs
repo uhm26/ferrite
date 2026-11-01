@@ -7,7 +7,7 @@ use super::{Event, Window};
 use crate::sys::mem::Map;
 use crate::wl::proto::{cursor_shape, keyboard, pointer, seat};
 use crate::wl::{Arg, Error, Event as WlEvent};
-use crate::xkb::{Key, Keyboard};
+use crate::xkb::{self, Key, Keyboard};
 
 pub enum Pointer {
     /// Position in surface pixels.
@@ -27,6 +27,10 @@ pub(super) struct Input {
     keyboard: u32,
     pointer: u32,
     cursor_dev: u32,
+    /// Serial of the last pointer enter (cursor changes must quote it) and the
+    /// cursor shape set since then (0 = none yet).
+    enter_serial: u32,
+    shape: u32,
     xkb: Option<Keyboard>,
     /// Repeats per second (0 = off) and the delay before the first repeat.
     rate: u32,
@@ -44,6 +48,8 @@ impl Default for Input {
             keyboard: 0,
             pointer: 0,
             cursor_dev: 0,
+            enter_serial: 0,
+            shape: 0,
             xkb: None,
             rate: 25,
             delay: Duration::from_millis(600),
@@ -69,7 +75,7 @@ impl Input {
         // Never burst to catch up after a stall.
         let next = (at + interval).max(now);
         self.repeat = Some((key, next));
-        self.xkb.as_ref().map(|x| x.key(key))
+        self.xkb.as_ref().map(|x| xkb::Key { repeat: true, ..x.key(key) })
     }
 }
 
@@ -167,18 +173,28 @@ impl Window {
         self.events.push_back(Event::Key(x.key(key)));
     }
 
+    /// Show cursor `shape` (`proto::cursor_shape::SHAPE_*`) while over our window.
+    pub fn set_cursor(&mut self, shape: u32) {
+        let i = &mut self.input;
+        if i.cursor_dev == 0 || i.shape == shape {
+            return;
+        }
+        i.shape = shape;
+        let args = [Arg::U(i.enter_serial), Arg::U(shape)];
+        if let Err(e) = self.conn.send(i.cursor_dev, cursor_shape::SET_SHAPE, &args) {
+            eprintln!("term: {e}");
+        }
+    }
+
     fn on_pointer(&mut self, ev: &WlEvent) -> Result<(), Error> {
         let mut a = ev.args();
         let inp = &mut self.input;
         let out = match ev.op {
             pointer::EV_ENTER => {
-                let serial = a.u32()?;
+                // The shape is set by the app on the Motion below (`set_cursor`).
+                inp.enter_serial = a.u32()?;
+                inp.shape = 0;
                 let _surface = a.u32()?;
-                if inp.cursor_dev != 0 {
-                    let args = [Arg::U(serial), Arg::U(cursor_shape::SHAPE_TEXT)];
-                    self.conn
-                        .send(inp.cursor_dev, cursor_shape::SET_SHAPE, &args)?;
-                }
                 Some(Pointer::Motion(a.fixed()?, a.fixed()?))
             }
             pointer::EV_MOTION => {

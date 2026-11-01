@@ -98,3 +98,11 @@ fn dcs_is_swallowed() {
 fn can_aborts() {
     assert_eq!(run(b"\x1b[12\x18x"), ["a:x"]);
 }
+
+#[test]
+fn too_many_params_are_dropped_not_glued() {
+    let many: String = (0..40).map(|i| format!("{};", i % 10)).collect();
+    let out = run(format!("\x1b[{many}m").as_bytes());
+    // 32 values kept; the last stored one is 1 (index 31), not 1 followed by more digits.
+    assert!(out[0].ends_with("[1]m"), "{}", out[0]);
+}

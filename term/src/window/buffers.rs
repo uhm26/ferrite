@@ -22,14 +22,14 @@ pub(super) struct Pool {
     generation: u32,
 }
 
-pub struct Buffer {
+pub(super) struct Buffer {
     id: u32,
     slot: usize,
     generation: u32,
-    pub w: usize,
-    pub h: usize,
+    w: usize,
+    h: usize,
     pub(super) busy: bool,
-    pub shown: Shown,
+    shown: Shown,
 }
 
 impl Buffer {

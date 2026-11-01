@@ -101,8 +101,11 @@ pub fn recv_with_fds(sock: RawFd, buf: &mut [u8], fds: &mut Vec<OwnedFd>) -> io:
     if n < 0 {
         return Err(io::Error::last_os_error());
     }
-    let bytes: Vec<u8> = control.iter().flat_map(|w| w.to_ne_bytes()).collect();
-    take_fds(&bytes[..msg.controllen.min(bytes.len())], fds);
+    if msg.controllen > 0 {
+        // Rare (only events carrying an fd), so the copy to bytes is fine here.
+        let bytes: Vec<u8> = control.iter().flat_map(|w| w.to_ne_bytes()).collect();
+        take_fds(&bytes[..msg.controllen.min(bytes.len())], fds);
+    }
     Ok(n as usize)
 }
 

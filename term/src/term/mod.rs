@@ -128,7 +128,6 @@ pub struct Term {
     /// The palette changed: every cell must be redrawn.
     pub recolor: bool,
     pub title: Option<String>,
-    pub bell: bool,
     /// Bytes to send back to the shell.
     pub replies: Vec<u8>,
     /// Rows scrolled back from the bottom (0 = live).
@@ -164,7 +163,6 @@ impl Term {
             dirty: true,
             recolor: true,
             title: None,
-            bell: false,
             replies: Vec::new(),
             view: 0,
         }

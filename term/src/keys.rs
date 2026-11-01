@@ -118,6 +118,7 @@ mod tests {
             sym,
             text: text.into(),
             mods,
+            repeat: false,
         }
     }
 

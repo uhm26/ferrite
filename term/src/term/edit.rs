@@ -65,7 +65,10 @@ impl Term {
             if !self.modes.autowrap || self.cols < 2 {
                 return;
             }
-            self.wrap(); // a wide char never splits across rows
+            // A wide char never splits across rows; the cell it leaves is blanked.
+            let (row, blank) = (self.cursor.row, self.blank());
+            self.grid.row_mut(row).cells[self.cols - 1] = blank;
+            self.wrap();
         }
         if self.modes.insert {
             self.insert_chars(width);

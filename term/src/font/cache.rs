@@ -1,4 +1,4 @@
-//! Rasterized glyphs, kept for the font's lifetime. Printable ASCII is a direct
+//! Rasterized glyphs, kept until the font changes (zoom, live config). Printable ASCII is a direct
 //! array index; everything else is a hash map with a cheap integer hash.
 
 use std::collections::HashMap;

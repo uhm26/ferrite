@@ -5,7 +5,7 @@
 use std::ffi::{CString, c_char, c_int, c_long, c_uint, c_ulong};
 use std::path::Path;
 
-pub type FtError = c_int;
+type FtError = c_int;
 
 /// FT_LOAD_RENDER: rasterize into an 8-bit coverage bitmap.
 pub const LOAD_RENDER: i32 = 4;
@@ -152,11 +152,11 @@ impl Face {
         unsafe { FT_Get_Char_Index(self.0, c_ulong::from(c as u32)) != 0 }
     }
 
-    /// Size metrics (26.6): ascender, descender (negative), height.
-    pub fn metrics(&self) -> (i64, i64, i64) {
+    /// Size metrics (26.6): ascender, descender (negative).
+    pub fn metrics(&self) -> (i64, i64) {
         // SAFETY: face and its active size are live; fields are plain integers.
         let m = unsafe { &(*(*self.0).size).metrics };
-        (m.ascender, m.descender, m.height)
+        (m.ascender, m.descender)
     }
 
     /// Load and rasterize `c` as gray coverage. Advance is in 26.6.

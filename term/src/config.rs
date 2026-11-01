@@ -112,13 +112,15 @@ impl Config {
         let num = || {
             value
                 .parse::<f64>()
-                .map_err(|_| format!("bad number {value:?}"))
+                .ok()
+                .filter(|v| v.is_finite() && *v >= 0.0) // no NaN, inf or negatives
+                .ok_or_else(|| format!("bad number {value:?}"))
         };
         match key {
             "font" => self.font = value.to_string(),
             "font_size" => self.font_size = (num()? as f32).clamp(4.0, 72.0),
-            "scrollback" => self.scrollback = num()? as usize,
-            "padding" => self.padding = num()? as usize,
+            "scrollback" => self.scrollback = (num()? as usize).min(1_000_000),
+            "padding" => self.padding = (num()? as usize).min(200),
             "opacity" => self.theme.opacity = (num()? as f32).clamp(0.0, 1.0),
             "shell" => self.shell = Some(value.to_string()),
             _ => {

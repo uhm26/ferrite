@@ -9,6 +9,7 @@ use crate::term::cell::Flags;
 use crate::term::{Mouse as Mode, Term};
 use crate::window::Pointer;
 use crate::wl::proto::pointer::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
+use crate::wl::proto::cursor_shape::{SHAPE_DEFAULT, SHAPE_POINTER};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const WHEEL_LINES: i32 = 3;
@@ -55,7 +56,9 @@ impl Mouse {
         let s = self.selection()?;
         let mut out = String::new();
         for line in s.start.0..=s.end.0 {
-            let (cells, wrapped) = term.line_cells(line)?;
+            let Some((cells, wrapped)) = term.line_cells(line) else {
+                continue; // scrolled out of history: copy the rest
+            };
             let from = if line == s.start.0 { s.start.1 } else { 0 };
             let to = if line == s.end.0 {
                 s.end.1 + 1
@@ -85,13 +88,17 @@ impl App {
         match p {
             Pointer::Motion(x, y) => {
                 (self.mouse.x, self.mouse.y) = (x, y);
+                let over_bar = y < self.renderer.top as f64;
+                self.win.set_cursor(if over_bar { SHAPE_POINTER } else { SHAPE_DEFAULT });
                 if self.dragging_tab() {
                     self.drag_tab();
                 } else {
                     self.motion();
                 }
             }
-            Pointer::Button { pressed: false, .. } if self.dragging_tab() => self.release_tab(),
+            Pointer::Button { pressed: false, button } if self.tab_press == Some(button) => {
+                self.release_tab();
+            }
             Pointer::Button {
                 button,
                 pressed: true,
@@ -170,7 +177,8 @@ impl App {
         }
         if button == BTN_MIDDLE && pressed {
             // Middle click pastes the clipboard (we have no primary selection).
-            return self.request_paste();
+            super::input::log(self.request_paste());
+            return Ok(());
         }
         if button != BTN_LEFT || !pressed {
             return Ok(());

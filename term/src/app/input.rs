@@ -53,6 +53,9 @@ impl App {
             return Ok(true);
         }
         if let Some(s) = shortcut(k) {
+            if k.repeat {
+                return Ok(true); // holding Ctrl+Shift+W must not close tab after tab
+            }
             return self.run_shortcut(s);
         }
         let s = &mut self.tabs[self.active];
@@ -61,6 +64,7 @@ impl App {
         };
         s.term.reset_view();
         s.pty.write(&bytes);
+        self.stats.key();
         if self.mouse.clear_selection() {
             self.redraw = true;
         }
@@ -75,11 +79,12 @@ impl App {
                     self.win.copy(text)?;
                 }
             }
-            Shortcut::Paste => self.request_paste()?,
+            // A failed paste or new tab (no fds, fork fails) must not take every tab down.
+            Shortcut::Paste => log(self.request_paste()),
             Shortcut::ZoomIn => self.set_font_size(size + 1.0),
             Shortcut::ZoomOut => self.set_font_size(size - 1.0),
             Shortcut::ZoomReset => self.set_font_size(self.cfg.font_size),
-            Shortcut::NewTab => self.open_tab()?,
+            Shortcut::NewTab => log(self.open_tab()),
             Shortcut::CloseTab => return self.close_tab(self.active),
             Shortcut::Restart => self.restart()?,
         }
@@ -87,13 +92,27 @@ impl App {
     }
 
     /// Ask the compositor for the clipboard; the text arrives in `read_paste`.
+    /// An image on the clipboard (and no text) is fetched too: it becomes a file and
+    /// its path is pasted, which Claude Code attaches as an image (no wl-paste needed).
     pub(super) fn request_paste(&mut self) -> Result<(), Error> {
+        let image = self.win.clipboard_is_image();
         if self.paste.is_none()
-            && let Some(fd) = self.win.paste()?
+            && let Some((fd, mime)) = self.win.paste(image)?
         {
-            self.paste = Some((fd.into(), Vec::new()));
+            self.paste = Some((fd.into(), Vec::new(), image.then_some(mime)));
         }
         Ok(())
+    }
+
+    /// Hand a finished paste to the shell: text as is, an image as a saved file's path.
+    pub(super) fn finish_paste(&mut self, data: &[u8], image: Option<String>) {
+        let Some(mime) = image else {
+            return self.paste_bytes(data);
+        };
+        match save_image(data, &mime) {
+            Ok(path) => self.paste_bytes(path.to_string_lossy().as_bytes()),
+            Err(e) => eprintln!("term: cannot save pasted image: {e}"),
+        }
     }
 
     /// Send pasted text: bracketed if the app asked, else newlines become CR.
@@ -115,6 +134,51 @@ impl App {
     }
 }
 
+/// How many pasted images stay on disk (newest first); older ones are removed.
+const KEEP_IMAGES: usize = 10;
+
+/// Save pasted image bytes as `$XDG_RUNTIME_DIR/term/paste-<ms>.<ext>` (RAM, gone at
+/// reboot), keep the newest [`KEEP_IMAGES`], and return the new file's path.
+fn save_image(data: &[u8], mime: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from)
+        .join("term");
+    save_in(&dir, data, mime)
+}
+
+fn save_in(dir: &std::path::Path, data: &[u8], mime: &str) -> std::io::Result<std::path::PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    // The mime comes from whatever app owns the clipboard: only a plain word is a name.
+    let ext = match mime.strip_prefix("image/") {
+        Some("jpeg") => "jpg",
+        Some(e) if !e.is_empty() && e.bytes().all(|b| b.is_ascii_alphanumeric()) => e,
+        _ => "png",
+    };
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let path = dir.join(format!("paste-{ms}.{ext}"));
+    std::fs::write(&path, data)?;
+    let mut old: Vec<_> = std::fs::read_dir(dir)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("paste-")))
+        .collect();
+    old.sort(); // same-length millisecond names sort by time
+    let extra = old.len().saturating_sub(KEEP_IMAGES);
+    for p in &old[..extra] {
+        let _ = std::fs::remove_file(p);
+    }
+    Ok(path)
+}
+
+/// Report an error that only cost one action (a paste, a new tab) and carry on.
+pub(super) fn log(r: Result<(), Error>) {
+    if let Err(e) = r {
+        eprintln!("term: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +194,7 @@ mod tests {
                 alt,
                 logo: false,
             },
+            repeat: false,
         }
     }
 
@@ -152,5 +217,19 @@ mod tests {
         assert!(shortcut(&key('3' as u32, false, false, true)).is_none()); // Alt+3: to the shell
         assert!(shortcut(&key('c' as u32, true, false, false)).is_none()); // Ctrl+C: to the shell
         assert!(shortcut(&key('V' as u32, true, true, false)).is_none());
+    }
+
+    #[test]
+    fn pasted_images_keep_the_newest() {
+        let dir = std::env::temp_dir().join(format!("term-paste-{}", std::process::id()));
+        let mut last = None;
+        for _ in 0..12 {
+            last = Some(super::save_in(&dir, b"png", "image/jpeg").unwrap());
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let last = last.unwrap();
+        assert!(last.exists() && last.extension().is_some_and(|e| e == "jpg"));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), super::KEEP_IMAGES);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

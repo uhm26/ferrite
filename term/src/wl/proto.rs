@@ -135,5 +135,6 @@ pub mod cursor_shape {
     pub const GET_POINTER: u16 = 1;
     /// wp_cursor_shape_device_v1.set_shape
     pub const SET_SHAPE: u16 = 1;
-    pub const SHAPE_TEXT: u32 = 9;
+    pub const SHAPE_DEFAULT: u32 = 1; // the normal arrow (owner: no I-beam)
+    pub const SHAPE_POINTER: u32 = 4; // clickable element (tabs)
 }

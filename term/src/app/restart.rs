@@ -50,7 +50,7 @@ impl App {
             let screen = s.term.dump();
             let size = (s.term.cols() as u16, s.term.rows() as u16);
             let (name, title) = (s.name, s.title);
-            let (fd, pid) = s.pty.hand_over()?;
+            let (fd, pid) = s.pty.hand_over();
             let tab = SavedTab {
                 fd,
                 pid,
@@ -68,7 +68,10 @@ impl App {
             .exec();
         eprintln!("term: restart failed: {err}");
         self.tabs = sessions(&self.cfg, saved);
-        self.active = self.active.min(self.tabs.len().saturating_sub(1));
+        if self.tabs.is_empty() {
+            self.first_tab(Vec::new())?; // never run on with no tab (index panics)
+        }
+        self.active = self.active.min(self.tabs.len() - 1);
         self.refresh_labels();
         Ok(())
     }

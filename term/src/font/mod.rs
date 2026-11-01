@@ -44,6 +44,8 @@ pub struct Font {
     // Field order matters: faces drop before the library.
     faces: Vec<ft::Face>,
     fallbacks: Vec<(PathBuf, i32, ft::Face)>,
+    /// Characters no installed font has (asked fontconfig once already).
+    missing: std::collections::HashSet<char>,
     lib: ft::Library,
     family: String,
     pub size: f32,
@@ -69,6 +71,7 @@ impl Font {
         let mut font = Font {
             faces,
             fallbacks: Vec::new(),
+            missing: std::collections::HashSet::new(),
             lib,
             family: family.to_string(),
             size,
@@ -94,7 +97,7 @@ impl Font {
     }
 
     fn measure(&mut self) {
-        let (asc, desc, _) = self.faces[0].metrics();
+        let (asc, desc) = self.faces[0].metrics();
         let advance = self.faces[0].render('M').map_or(self.size as i64 * 40, |(_, a)| a);
         self.cell_w = ((advance + 32) / 64).max(1) as usize;
         let asc = (asc + 63) / 64;
@@ -135,12 +138,15 @@ impl Font {
         if let Some(i) = self.fallbacks.iter().position(|(_, _, f)| f.has(c)) {
             return &mut self.fallbacks[i].2;
         }
-        if let Some((path, index)) = fc::find(&self.family, Some(c))
+        // A fontconfig search costs milliseconds: do it once per character, ever.
+        if self.missing.insert(c)
+            && let Some((path, index)) = fc::find(&self.family, Some(c))
             && !self.fallbacks.iter().any(|(p, i, _)| *p == path && *i == index)
             && let Some(mut face) = self.lib.open(&path, index)
             && face.has(c)
+            && face.set_size(self.size) // bitmap-only fonts (color emoji) can't be sized
         {
-            face.set_size(self.size);
+            self.missing.remove(&c);
             self.fallbacks.push((path, index, face));
             let last = self.fallbacks.len() - 1;
             return &mut self.fallbacks[last].2;

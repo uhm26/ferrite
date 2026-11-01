@@ -6,7 +6,7 @@
 pub mod draw;
 mod tabbar;
 
-use crate::color::Theme;
+use crate::color::{self, Theme};
 use crate::font::{Font, GlyphCache};
 use crate::term::cell::{Cell, Flags};
 use crate::term::{CursorShape, Term};
@@ -173,7 +173,9 @@ impl Renderer {
             .extend_from_slice(&src[..src.len().min(term.cols())]);
         self.row.resize(term.cols(), Cell::BLANK);
         let line = marks.first_line + y as u64;
-        if let Some(sel) = marks.selection {
+        if let Some(sel) = marks.selection
+            && (sel.start.0..=sel.end.0).contains(&line) // rows outside: no per-cell checks
+        {
             for (x, c) in self.row.iter_mut().enumerate() {
                 if sel.contains(line, x) {
                     c.flags.0 |= SELECTED;
@@ -245,7 +247,7 @@ impl Renderer {
         let f = c.flags.0;
         let block = f & CURSOR != 0 && f & (CURSOR_UNDERLINE | CURSOR_BEAM | CURSOR_HOLLOW) == 0;
         if block {
-            (fg, bg) = (term.palette.bg_px(), term.palette.cursor_px());
+            (fg, bg) = (color::px(term.palette.bg), term.palette.cursor_px());
         }
         let style =
             usize::from(c.flags.has(Flags::BOLD)) | usize::from(c.flags.has(Flags::ITALIC)) << 1;
@@ -317,14 +319,17 @@ fn colors(term: &Term, c: Cell) -> (u32, u32) {
     let p = &term.palette;
     let mut fg = p.fg(c.fg, c.flags.has(Flags::BOLD));
     let mut bg = p.bg(c.bg);
+    // Text is always opaque: a glass background used as text color (reverse, dim)
+    // would let the wallpaper show through the letters.
+    let solid = |c: u32| if c >> 24 == 0xff { c } else { color::px(p.bg) };
     if c.flags.has(Flags::REVERSE) {
-        (fg, bg) = (bg, fg);
+        (fg, bg) = (solid(bg), fg);
     }
     if c.flags.0 & SELECTED != 0 {
         bg = p.selection_px();
     }
     if c.flags.has(Flags::DIM) {
-        fg = draw::blend(bg, fg, 150);
+        fg = draw::blend(solid(bg), fg, 150);
     }
     (fg, bg)
 }

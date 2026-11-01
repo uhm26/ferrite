@@ -13,26 +13,16 @@ const ESCAPE: u32 = 0xff1b;
 const KP_ENTER: u32 = 0xff8d;
 const MAX_NAME: usize = 64;
 
-/// A left press on a tab, held until release (dragging moves the tab).
-#[derive(Clone, Copy)]
-pub(super) struct TabPress;
-
 impl App {
+    /// The left button is held on a tab: moving drags it.
     pub(super) fn dragging_tab(&self) -> bool {
-        self.tab_press.is_some()
-    }
-
-    /// The tab slot under the pointer, past the last tab = the last one.
-    fn slot(&self) -> usize {
-        let n = self.tabs.len();
-        let w = self.win.width;
-        self.renderer
-            .tab_at(self.mouse.x, w, &self.labels)
-            .unwrap_or(n - 1)
+        self.tab_press == Some(BTN_LEFT)
     }
 
     /// A press on the bar. Returns false when the last tab was closed.
     pub(super) fn press_tab(&mut self, button: u32) -> Result<bool, Error> {
+        // Remembered so its release goes nowhere (not to an app with mouse reporting).
+        self.tab_press = Some(button);
         self.finish_rename()?;
         let Some(i) = self
             .renderer
@@ -41,10 +31,7 @@ impl App {
             return Ok(true);
         };
         match button {
-            BTN_LEFT => {
-                self.tab_press = Some(TabPress);
-                self.select_tab(i)?;
-            }
+            BTN_LEFT => self.select_tab(i)?,
             BTN_RIGHT => {
                 self.select_tab(i)?;
                 self.tabs[i].editing = Some(String::new());
@@ -57,17 +44,21 @@ impl App {
         Ok(true)
     }
 
-    /// While a tab is held, moving over another slot moves the tab there.
+    /// While a tab is held, it swaps with a neighbour once the pointer passes that
+    /// neighbour's middle. (Swapping as soon as the pointer is over it flips a short
+    /// tab back and forth next to a long one: after the swap the pointer is over the
+    /// long one again.) Loops so a fast drag can pass several tabs.
     pub(super) fn drag_tab(&mut self) {
-        let to = self.slot();
-        if to == self.active {
-            return;
+        loop {
+            let spans = self.renderer.tab_spans(&self.labels, self.win.width);
+            let Some(to) = drag_target(&spans, self.active, self.mouse.x) else {
+                return;
+            };
+            self.tabs.swap(self.active, to);
+            self.active = to;
+            self.refresh_labels();
+            self.redraw = true;
         }
-        let tab = self.tabs.remove(self.active);
-        self.tabs.insert(to, tab);
-        self.active = to;
-        self.refresh_labels();
-        self.redraw = true;
     }
 
     pub(super) fn release_tab(&mut self) {
@@ -115,5 +106,33 @@ impl App {
         self.refresh_labels();
         self.redraw = true;
         self.update_title()
+    }
+}
+
+/// Where the held tab `i` goes for pointer `x`: a neighbour whose middle the pointer
+/// has passed, else nowhere. `spans` are (x, width) per tab.
+fn drag_target(spans: &[(usize, usize)], i: usize, x: f64) -> Option<usize> {
+    let mid = |j: usize| spans.get(j).map(|&(x, w)| (x + w / 2) as f64);
+    match (mid(i + 1), i.checked_sub(1).and_then(mid)) {
+        (Some(m), _) if x > m => Some(i + 1),
+        (_, Some(m)) if x < m => Some(i - 1),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drag_target;
+
+    #[test]
+    fn short_tab_next_to_long_one_does_not_flip() {
+        // Short tab (50 px) dragged right over a long one (200 px).
+        let before = [(0, 50), (50, 200)];
+        assert_eq!(drag_target(&before, 0, 120.0), None); // not past the middle (150)
+        assert_eq!(drag_target(&before, 0, 160.0), Some(1));
+        // After the swap: long tab first, held short tab second, pointer unchanged.
+        let after = [(0, 200), (200, 50)];
+        assert_eq!(drag_target(&after, 1, 160.0), None); // stays put: no flip back
+        assert_eq!(drag_target(&after, 1, 90.0), Some(0)); // back left past its middle
     }
 }

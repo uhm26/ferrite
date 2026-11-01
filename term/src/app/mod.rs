@@ -41,6 +41,8 @@ const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
 /// (foot's default resize-delay-ms is 100).
 const REGRID_DELAY: Duration = Duration::from_millis(100);
 const READY: i16 = POLLIN | POLLHUP | POLLERR;
+/// Largest paste (text or image) we hold in memory.
+const MAX_PASTE: usize = 64 << 20;
 
 #[derive(Debug)]
 pub enum Error {
@@ -87,15 +89,16 @@ pub struct App {
     resized: bool,
     /// When the grids follow the window size (see `resize`).
     regrid_at: Option<Instant>,
-    paste: Option<(File, Vec<u8>)>,
+    /// A paste in flight: the pipe, bytes so far, and the image mime if it is one.
+    paste: Option<(File, Vec<u8>, Option<String>)>,
     mouse: mouse::Mouse,
     /// Window title last sent.
     title: String,
     stats: stats::Stats,
     /// Reused poll set: window, paste, then one slot per tab.
     fds: Vec<PollFd>,
-    /// A tab held with the left button (drag to move, click to rename).
-    tab_press: Option<tabbar::TabPress>,
+    /// Mouse button held since a press on the tab bar (left: drag to move).
+    tab_press: Option<u32>,
     /// Config file + rice glass switch, for live reloads.
     watch: Option<crate::sys::watch::Watch>,
 }
@@ -224,7 +227,7 @@ impl App {
         fds.push(PollFd::new(self.win.fd(), POLLIN));
         // fd -1 makes poll skip a slot: no paste running, or no live settings.
         let none = PollFd { fd: -1, events: 0, revents: 0 };
-        fds.push(self.paste.as_ref().map_or(none, |(f, _)| PollFd::new(f.as_fd(), POLLIN)));
+        fds.push(self.paste.as_ref().map_or(none, |(f, _, _)| PollFd::new(f.as_fd(), POLLIN)));
         fds.push(self.watch.as_ref().map_or(none, |w| PollFd::new(w.fd(), POLLIN)));
         for s in &self.tabs {
             let out = if s.pty.wants_write() { POLLOUT } else { 0 };
@@ -269,6 +272,9 @@ impl App {
                 let (n, alive) = s.read(buf, budget);
                 budget = budget.saturating_sub(n).max(64 << 10);
                 self.stats.bytes += n as u64;
+                if n > 0 {
+                    self.stats.output();
+                }
                 if !alive {
                     if !self.close_tab(i)? {
                         return Ok(false);
@@ -290,8 +296,12 @@ impl App {
     fn handle(&mut self, ev: Event) -> Result<bool, Error> {
         match ev {
             Event::Close => return Ok(false),
-            Event::Resize(w, h) => self.resize(w, h),
-            Event::Frame | Event::Released => {}
+            Event::Resize(w, h) => {
+                // Every configure is acked; answer it with a commit even if nothing changed.
+                self.resized = true;
+                self.redraw = true;
+                self.resize(w, h);
+            }
             Event::Key(k) => return self.key(&k),
             Event::Focus(on) => {
                 self.focused = on;
@@ -373,28 +383,34 @@ impl App {
         self.stats.add_frame(t0.elapsed());
         self.tabs[self.active].term.dirty = false;
         self.redraw = false;
-        self.resized = false;
-        if !damage.is_empty() {
+        let resized = std::mem::take(&mut self.resized);
+        if !damage.is_empty() || resized {
             self.win.present(i, &damage)?;
+            self.stats.presented();
         }
         Ok(())
     }
 
     fn read_paste(&mut self) {
-        let Some((f, data)) = &mut self.paste else {
+        let Some((f, data, _)) = &mut self.paste else {
             return;
         };
         let mut chunk = [0u8; 16 << 10];
         loop {
             match f.read(&mut chunk) {
                 Ok(0) => break,
+                Ok(n) if data.len() + n > MAX_PASTE => {
+                    eprintln!("term: paste over {} MiB dropped", MAX_PASTE >> 20);
+                    self.paste = None;
+                    return;
+                }
                 Ok(n) => data.extend_from_slice(&chunk[..n]),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return,
                 Err(_) => break,
             }
         }
-        if let Some((_, data)) = self.paste.take() {
-            self.paste_bytes(&data);
+        if let Some((_, data, image)) = self.paste.take() {
+            self.finish_paste(&data, image);
         }
     }
 

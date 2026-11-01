@@ -48,17 +48,16 @@ fn rewrap(
         if wrapped {
             continue;
         }
-        let rows = std::mem::take(&mut group);
         let cursor = (group_start..=i).contains(&cursor_row).then(|| {
             // Offset of the cursor in the joined line.
-            rows[..cursor_row - group_start]
+            group[..cursor_row - group_start]
                 .iter()
                 .map(|r| r.cells.len())
                 .sum::<usize>()
                 + cursor_col
         });
         let first = out.len();
-        let pos = line(rows, cols, cursor, &mut out);
+        let pos = line(&mut group, cols, cursor, &mut out); // empties `group`, keeps its memory
         if let Some(p) = pos {
             at = (first + p.0, p.1);
         }
@@ -70,7 +69,7 @@ fn rewrap(
 /// Rewrap one logical line into `out`. Returns the cursor's (row, col) relative to
 /// the first row of this line, if the cursor is in it.
 fn line(
-    mut rows: Vec<Row>,
+    rows: &mut Vec<Row>,
     cols: usize,
     cursor: Option<usize>,
     out: &mut Vec<Row>,
@@ -82,7 +81,7 @@ fn line(
         out.push(row);
         return cursor.map(|c| (0, c));
     }
-    let mut cells: Vec<Cell> = rows.into_iter().flat_map(|r| r.cells).collect();
+    let mut cells: Vec<Cell> = rows.drain(..).flat_map(|r| r.cells).collect();
     cells.truncate(trimmed(&cells));
     if let Some(c) = cursor {
         cells.resize(cells.len().max(c + 1), Cell::BLANK); // the cursor's cell exists

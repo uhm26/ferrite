@@ -4,6 +4,10 @@
 
 /// Coverage box for `c`, or None if the font should draw it.
 pub fn draw(c: char, w: usize, h: usize, t: usize) -> Option<Box<[u8]>> {
+    let block = (0x2580..=0x259f).contains(&(c as u32));
+    if !block && lines(c).is_none() && rounded(c).is_none() {
+        return None; // the common case: no buffer to allocate
+    }
     let mut b = Canvas {
         px: vec![0; w * h],
         w,

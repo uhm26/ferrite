@@ -23,8 +23,10 @@ pub fn blend(bg: u32, fg: u32, a: u8) -> u32 {
         0 => bg,
         255 => fg,
         _ => {
-            let (a, ia) = (u32::from(a), 255 - u32::from(a));
             // All four channels: colors are premultiplied ARGB, so alpha blends alike.
+            // (A two-channels-per-multiply version measured only 0-11 % faster: memory
+            // bound, so this stays simple.)
+            let (a, ia) = (u32::from(a), 255 - u32::from(a));
             let ch = |s: u32| (((fg >> s & 0xff) * a + (bg >> s & 0xff) * ia + 127) / 255) << s;
             ch(24) | ch(16) | ch(8) | ch(0)
         }
@@ -69,25 +71,19 @@ impl Canvas<'_> {
         }
     }
 
-    /// A rounded top corner (circle `c`, radius `r`) whose top edge carries an accent
-    /// line `t` px thick at the top, tapering to nothing at the side, so the line
-    /// follows the curve instead of stopping where it starts.
-    pub fn capped_corner(
-        &mut self,
-        sq: Rect,
-        c: (f32, f32),
-        (r, t): (f32, f32),
-        (tab, accent, bar): (u32, u32, u32),
-    ) {
-        for y in sq.y..(sq.y + sq.h).min(self.h) {
-            for x in sq.x..(sq.x + sq.w).min(self.w) {
-                let (dx, dy) = (x as f32 + 0.5 - c.0, y as f32 + 0.5 - c.1);
-                let d = (dx * dx + dy * dy).sqrt().max(1e-3);
-                let up = (-dy / d).max(0.0); // 1 straight up, 0 at the side
-                let outer = (r - d + 0.5).clamp(0.0, 1.0);
-                let inner = (r - t * up - d + 0.5).clamp(0.0, 1.0);
-                let inside = blend(accent, tab, (inner * 255.0) as u8);
-                self.px[y * self.w + x] = blend(bar, inside, (outer * 255.0) as u8);
+    /// A horizontal pill (fully rounded ends) filling `r`: `color` over `bg`,
+    /// antialiased.
+    pub fn pill(&mut self, r: Rect, (color, bg): (u32, u32)) {
+        let rad = r.h as f32 / 2.0;
+        let cy = r.y as f32 + rad;
+        let (x0, x1) = (r.x as f32 + rad, (r.x + r.w) as f32 - rad);
+        for y in r.y..(r.y + r.h).min(self.h) {
+            for x in r.x..(r.x + r.w).min(self.w) {
+                let px = x as f32 + 0.5;
+                let dx = (x0 - px).max(px - x1).max(0.0);
+                let dy = y as f32 + 0.5 - cy;
+                let cov = (rad - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
+                self.px[y * self.w + x] = blend(bg, color, (cov * 255.0) as u8);
             }
         }
     }

@@ -1,7 +1,7 @@
 //! The tab bar: a strip above the grid, shown with two or more tabs. Flat, rice
 //! style: surface background, 1 px hairlines, dim inactive titles. The active tab
-//! opens into the terminal below (same background, no bottom line) and carries a
-//! thin sand accent on top.
+//! opens into the terminal below (same background, no bottom line); a short sand pill
+//! under its title is the one accent.
 
 use super::draw::{Canvas, Rect};
 use super::{Renderer, Shown, View};
@@ -9,11 +9,11 @@ use crate::color::{self, px};
 use crate::term::Term;
 
 /// Space above and below the title text, px.
-const PAD_Y: usize = 5;
+const PAD_Y: usize = 4; // 4-grid (ui skill)
 /// Widest a tab gets, in cells (text plus one cell of space on each side).
 const MAX_TAB_CELLS: usize = 24;
-/// Accent line thickness on the active tab, px.
-const ACCENT: usize = 2;
+/// Height of the accent pill under the active tab's title, px.
+const ACCENT: usize = 2; // owner: 4 px was "a thick ass line"
 /// Radius of the active tab's corners, px.
 const CORNER: usize = 7;
 
@@ -24,7 +24,7 @@ impl Renderer {
 
     /// Each tab's (x, width): as wide as its text, at most [`MAX_TAB_CELLS`]; if
     /// they don't fit in `w`, no tab is wider than an equal share.
-    fn tab_spans(&self, labels: &[String], w: usize) -> Vec<(usize, usize)> {
+    pub fn tab_spans(&self, labels: &[String], w: usize) -> Vec<(usize, usize)> {
         let cw = self.font.cell_w;
         let want = |i: usize, l: &String| (text(i, l).chars().count() + 2).min(MAX_TAB_CELLS) * cw;
         let mut widths: Vec<usize> = labels.iter().enumerate().map(|(i, l)| want(i, l)).collect();
@@ -85,16 +85,25 @@ impl Renderer {
         }
         if let (Some(title), Some(&(x, tw))) = (view.tabs.get(active), spans.get(active)) {
             let r = Rect { x, y: 0, w: tw, h };
-            active_shape(canvas, r, (bg, glass(t.tab_bg)), px(t.cursor));
-            self.label(canvas, r, &text(active, title), (px(t.tab_active), bg));
+            active_shape(canvas, r, (bg, glass(t.tab_bg)));
+            let n = self.label(canvas, r, &text(active, title), (px(t.tab_active), bg));
+            // The one accent: an M3 tab indicator, a pill as wide as the title, on the
+            // tab's bottom edge.
+            let cw = self.font.cell_w;
+            let pill = Rect { x: x + cw, y: h - ACCENT, w: n * cw, h: ACCENT };
+            canvas.pill(pill, (px(t.cursor), bg));
         }
         Some(bar)
     }
 
     /// One tab's text, one cell in from the left, cut with `…` if too long.
-    fn label(&mut self, canvas: &mut Canvas, r: Rect, text: &str, (fg, bg): (u32, u32)) {
+    /// Returns how many cells it took.
+    fn label(&mut self, canvas: &mut Canvas, r: Rect, text: &str, (fg, bg): (u32, u32)) -> usize {
         let (cw, ch) = (self.font.cell_w, self.font.cell_h);
         let room = r.w.saturating_sub(2 * cw) / cw;
+        if room == 0 {
+            return 0; // a squeezed tab: no text rather than text spilling into the next
+        }
         let mut chars: Vec<char> = text.chars().collect();
         if chars.len() > room {
             chars.truncate(room.saturating_sub(1));
@@ -113,6 +122,7 @@ impl Renderer {
             let g = self.cache.get(&mut self.font, c, 0, 1);
             canvas.glyph(cell, &g.data, bg, fg);
         }
+        chars.len()
     }
 }
 
@@ -124,25 +134,20 @@ fn text(i: usize, title: &str) -> String {
 /// The active tab as a surface growing out of the terminal below: rounded top
 /// corners, and inverted corners at the bottom that flare into the terminal's
 /// edge (rice vision: edge-grown surfaces, inverted corners). Antialiased.
-fn active_shape(canvas: &mut Canvas, r: Rect, (tab, bar): (u32, u32), accent: u32) {
+fn active_shape(canvas: &mut Canvas, r: Rect, (tab, bar): (u32, u32)) {
     let rad = CORNER.min(r.w / 2).min(r.h / 2);
     canvas.fill(r, tab);
     let (rf, x0, x1, h) = (rad as f32, r.x as f32, (r.x + r.w) as f32, r.h as f32);
     let sq = |x: usize, y: usize| Rect { x, y, w: rad, h: rad };
-    // Top corners: tab inside the circle, bar outside, the accent along the curve.
-    let line = (rf, ACCENT as f32);
-    let colors = (tab, accent, bar);
-    canvas.capped_corner(sq(r.x, 0), (x0 + rf, rf), line, colors);
-    canvas.capped_corner(sq(r.x + r.w - rad, 0), (x1 - rf, rf), line, colors);
+    // Top corners: tab inside the circle, bar outside.
+    canvas.round(sq(r.x, 0), (x0 + rf, rf), rf, (tab, bar));
+    canvas.round(sq(r.x + r.w - rad, 0), (x1 - rf, rf), rf, (tab, bar));
     // Bottom flares, just outside the tab: bar inside the circle, tab outside.
     let y = r.h - rad;
     if r.x >= rad {
         canvas.round(sq(r.x - rad, y), (x0 - rf, h - rf), rf, (bar, tab));
     }
     canvas.round(sq(r.x + r.w, y), (x1 + rf, h - rf), rf, (bar, tab));
-    // The one accent: a sand line along the top, continued by the corners.
-    let line = Rect { x: r.x + rad, y: 0, w: r.w.saturating_sub(2 * rad), h: ACCENT };
-    canvas.fill(line, accent);
 }
 
 #[cfg(test)]
