@@ -73,12 +73,7 @@ fn to_rgb(raw: Vec<u8>, w: usize, h: usize, cs: ColorSpace) -> Result<Rgb, Error
     }
     let px = match cs {
         ColorSpace::RGB => raw,
-        ColorSpace::RGBA => raw
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .flat_map(|p| over_black([p[0], p[1], p[2]], p[3]))
-            .collect(),
+        ColorSpace::RGBA => rgba_in_place(raw, w * h),
         ColorSpace::Luma => raw.iter().flat_map(|&l| [l, l, l]).collect(),
         ColorSpace::LumaA => raw
             .as_chunks::<2>()
@@ -89,6 +84,18 @@ fn to_rgb(raw: Vec<u8>, w: usize, h: usize, cs: ColorSpace) -> Result<Rgb, Error
         other => return Err(Error::Decode(format!("unsupported color space {other:?}"))),
     };
     Ok(Rgb { w, h, px })
+}
+
+/// RGBA → RGB inside the decoder's buffer: no second full-size copy. Pixel `i` is
+/// written to `3i..3i+3`, which is never past bytes still to be read (`4i..`).
+fn rgba_in_place(mut raw: Vec<u8>, n: usize) -> Vec<u8> {
+    for i in 0..n {
+        let p = [raw[4 * i], raw[4 * i + 1], raw[4 * i + 2]];
+        let rgb = over_black(p, raw[4 * i + 3]);
+        raw[3 * i..3 * i + 3].copy_from_slice(&rgb);
+    }
+    raw.truncate(n * 3);
+    raw
 }
 
 fn over_black(rgb: [u8; 3], a: u8) -> [u8; 3] {

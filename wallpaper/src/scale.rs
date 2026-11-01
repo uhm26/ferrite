@@ -77,61 +77,60 @@ pub fn cover(img: &Rgb, dw: usize, dh: usize, out: &mut [u32]) {
     let scale = (dw as f64 / sw as f64).max(dh as f64 / sh as f64);
     let tx = taps(sw, dw, scale, (sw as f64 - dw as f64 / scale) / 2.0);
     let ty = taps(sh, dh, scale, (sh as f64 - dh as f64 / scale) / 2.0);
-    let y0 = ty.start.first().copied().unwrap_or(0);
-    let y1 = ty
-        .start
-        .iter()
-        .zip(&ty.len)
-        .map(|(s, l)| s + l)
-        .max()
-        .unwrap_or(0);
-    let mid = horizontal(img, &tx, y0..y1, dw);
-    vertical(&mid, &ty, y0, dw, out);
+    // Horizontal results for the last `ty.stride` source rows only: an output row
+    // reads at most that many consecutive rows, and row windows only move down.
+    // Each needed source row is resampled once; rows no output reads are skipped.
+    let row = dw * 3;
+    let mut ring = vec![0u16; ty.stride * row];
+    let mut acc = vec![0i32; row];
+    let mut next = 0; // first source row not resampled yet
+    for (y, line) in out.chunks_exact_mut(dw).enumerate() {
+        let end = ty.start[y] + ty.len[y];
+        for r in next.max(ty.start[y])..end {
+            let slot = r % ty.stride * row;
+            horizontal(img, &tx, r, &mut ring[slot..slot + row]);
+        }
+        next = next.max(end);
+        vertical(&ring, &ty, y, &mut acc, line);
+    }
 }
 
-/// Resample rows `rows` across: → u16 RGB, `dw` wide, `MID` extra bits.
-fn horizontal(img: &Rgb, tx: &Taps, rows: std::ops::Range<usize>, dw: usize) -> Vec<u16> {
-    let mut mid = vec![0u16; rows.len() * dw * 3];
+/// Resample source row `y` across into `line`: u16 RGB, `MID` extra bits.
+fn horizontal(img: &Rgb, tx: &Taps, y: usize, line: &mut [u16]) {
     let round = 1 << (BITS - MID - 1);
-    for (y, line) in rows.zip(mid.chunks_exact_mut(dw * 3)) {
-        let src = &img.px[y * img.w * 3..(y + 1) * img.w * 3];
-        for (x, px) in line.as_chunks_mut::<3>().0.iter_mut().enumerate() {
-            let w = &tx.w[x * tx.stride..x * tx.stride + tx.len[x]];
-            let s = &src[tx.start[x] * 3..(tx.start[x] + tx.len[x]) * 3];
-            let (mut r, mut g, mut b) = (round, round, round);
-            for (wk, p) in w.iter().zip(s.as_chunks::<3>().0.iter()) {
-                r += i32::from(p[0]) * wk;
-                g += i32::from(p[1]) * wk;
-                b += i32::from(p[2]) * wk;
-            }
-            let shift = BITS - MID;
-            px.copy_from_slice(&[
-                (r >> shift) as u16,
-                (g >> shift) as u16,
-                (b >> shift) as u16,
-            ]);
+    let src = &img.px[y * img.w * 3..(y + 1) * img.w * 3];
+    for (x, px) in line.as_chunks_mut::<3>().0.iter_mut().enumerate() {
+        let w = &tx.w[x * tx.stride..x * tx.stride + tx.len[x]];
+        let s = &src[tx.start[x] * 3..(tx.start[x] + tx.len[x]) * 3];
+        let (mut r, mut g, mut b) = (round, round, round);
+        for (wk, p) in w.iter().zip(s.as_chunks::<3>().0.iter()) {
+            r += i32::from(p[0]) * wk;
+            g += i32::from(p[1]) * wk;
+            b += i32::from(p[2]) * wk;
+        }
+        let shift = BITS - MID;
+        px.copy_from_slice(&[
+            (r >> shift) as u16,
+            (g >> shift) as u16,
+            (b >> shift) as u16,
+        ]);
+    }
+}
+
+/// Output row `y`: down the columns of the rows in `ring`, packed into `line`.
+fn vertical(ring: &[u16], ty: &Taps, y: usize, acc: &mut [i32], line: &mut [u32]) {
+    let row = acc.len();
+    acc.fill(1 << (BITS + MID - 1));
+    for k in 0..ty.len[y] {
+        let wk = ty.w[y * ty.stride + k];
+        let slot = (ty.start[y] + k) % ty.stride * row;
+        for (a, &m) in acc.iter_mut().zip(&ring[slot..slot + row]) {
+            *a += i32::from(m) * wk;
         }
     }
-    mid
-}
-
-/// Resample down the columns of `mid` (rows from `y0`) into packed output rows.
-fn vertical(mid: &[u16], ty: &Taps, y0: usize, dw: usize, out: &mut [u32]) {
-    let mut acc = vec![0i32; dw * 3];
-    let round = 1 << (BITS + MID - 1);
-    for (y, line) in out.chunks_exact_mut(dw).enumerate() {
-        acc.fill(round);
-        for k in 0..ty.len[y] {
-            let wk = ty.w[y * ty.stride + k];
-            let r = ty.start[y] + k - y0;
-            for (a, &m) in acc.iter_mut().zip(&mid[r * dw * 3..(r + 1) * dw * 3]) {
-                *a += i32::from(m) * wk;
-            }
-        }
-        for (o, c) in line.iter_mut().zip(acc.as_chunks::<3>().0.iter()) {
-            let ch = |v: i32| (v >> (BITS + MID)).clamp(0, 255) as u8;
-            *o = pack(ch(c[0]), ch(c[1]), ch(c[2]));
-        }
+    for (o, c) in line.iter_mut().zip(acc.as_chunks::<3>().0.iter()) {
+        let ch = |v: i32| (v >> (BITS + MID)).clamp(0, 255) as u8;
+        *o = pack(ch(c[0]), ch(c[1]), ch(c[2]));
     }
 }
 
@@ -170,8 +169,8 @@ mod tests {
     #[test]
     fn halving_averages_pairs() {
         // 16x2 alternating black/white columns → 8x1: the finest pattern there is
-        // must turn mid-gray, not alias. Edge pixels lose half their filter, so
-        // only the interior is checked.
+        // must turn mid-gray, not alias. Edge pixels see a one-sided (renormalised)
+        // filter, so only the interior is checked.
         let mut img = solid(16, 2, [0, 0, 0]);
         for y in 0..2 {
             for x in (1..16).step_by(2) {
@@ -183,6 +182,30 @@ mod tests {
         for &p in &out[1..7] {
             let g = (p >> 8) & 0xff;
             assert!((126..=129).contains(&g), "got {g}");
+        }
+    }
+
+    #[test]
+    fn vertical_gradient_keeps_its_rows() {
+        // Gray = source row: every output row must read the right ring slots, both
+        // shrinking (windows skip rows) and enlarging (windows reuse rows). The edge
+        // rows see a one-sided filter, so they are skipped.
+        let (sw, sh) = (256, 256);
+        let mut img = solid(sw, sh, [0; 3]);
+        for (y, line) in img.px.chunks_exact_mut(sw * 3).enumerate() {
+            line.fill(y as u8);
+        }
+        for d in [37, 100, 256 + 1, 700] {
+            let mut out = vec![0; d * d];
+            cover(&img, d, d, &mut out);
+            for y in 1..d - 1 {
+                let want = ((y as f64 + 0.5) * sh as f64 / d as f64 - 0.5).clamp(0.0, 255.0);
+                let got = f64::from(out[y * d + d / 2] & 0xff);
+                assert!(
+                    (got - want).abs() <= 1.0,
+                    "{d}: row {y} got {got} want {want}"
+                );
+            }
         }
     }
 
