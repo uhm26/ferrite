@@ -12,7 +12,7 @@ set -eu
 
 REPO="uhm26/ferrite"
 # Tools with prebuilt releases so far; the others: build from source (see README.md).
-PREBUILT="clipboard"
+PREBUILT="clipboard screenshot wallpaper"
 ALL_TOOLS="term files image video screenshot wallpaper clipboard"
 
 say() { printf 'ferrite: %s\n' "$*"; }
@@ -119,6 +119,8 @@ install_one() {
 notes_for() {
     case "$1" in
         clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = clipboard; sway: exec clipboard)" ;;
+        wallpaper) say "wallpaper: run wallpaper IMAGE once; start a bare wallpaper with your session to restore it" ;;
+        screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to ~/Pictures" ;;
     esac
 }
 

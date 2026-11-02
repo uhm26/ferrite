@@ -21,7 +21,11 @@
 
 ## Install
 
-One-line installer: coming soon (see the [main README](../README.md)).
+Prebuilt (x86_64 Linux, static, no root):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- wallpaper
+```
 
 Build from source (needs Rust stable), from a clone of this repo:
 

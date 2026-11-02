@@ -31,7 +31,7 @@ Prebuilt binaries for x86_64 Linux, checked with SHA-256, installed to `~/.local
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- clipboard
 ```
 
-Prebuilt so far: `clipboard`. The other tools: build from source (below). Run it again to
+Prebuilt so far: `clipboard`, `screenshot`, `wallpaper`. The others: build from source (below). Run it again to
 update; `--uninstall` removes a tool, `--help` lists the options.
 
 ## Build from source
