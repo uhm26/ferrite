@@ -208,7 +208,7 @@ check_libs() {
         say "warning: your system's glibc is older than this build needs; build from source instead: https://github.com/$REPO#build-from-source"
         return 0
     fi
-    missing=$(printf '%s\n' "$out" | awk '/not found/ {print $1}' | sort -u)
+    missing=$(printf '%s\n' "$out" | awk '/not found/ {print $1}' | sort -u | tr '\n' ' ')
     [ -n "$missing" ] || return 0
     family=$(distro_family)
     pkgs=""
@@ -216,7 +216,7 @@ check_libs() {
         p=$(pkg_for "$so" "$family")
         case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac
     done
-    say "missing system libraries:" $missing
+    say "missing system libraries: $missing"
     case "$family" in
         arch) say "install them with: sudo pacman -S --needed$pkgs" ;;
         debian) say "install them with: sudo apt install$pkgs" ;;
