@@ -54,7 +54,7 @@ impl Conn {
             Arg::U(surf),
             Arg::U(output),
             layer,
-            Arg::S("wall"),
+            Arg::S("wallpaper"),
         ];
         self.send(shell, layer_shell::GET_LAYER_SURFACE, &args)?;
         self.send(

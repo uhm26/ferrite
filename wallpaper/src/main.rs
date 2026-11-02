@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use wall::{app, ipc};
+use wallpaper::{app, ipc};
 
-const USAGE: &str = "usage: wall [image.png|image.jpg]\n\
+const USAGE: &str = "usage: wallpaper [image.png|image.jpg]\n\
     First call stays running and shows the image; later calls switch it.\n\
     No image: show the last one again.";
 
@@ -25,7 +25,7 @@ fn main() -> ExitCode {
         Ok(ipc::Role::Client(s)) => match ipc::request(s, &image) {
             Ok(Ok(())) => ExitCode::SUCCESS,
             Ok(Err(why)) => fail(why),
-            Err(e) => fail(format!("talking to the running wall: {e}")),
+            Err(e) => fail(format!("talking to the running wallpaper: {e}")),
         },
         Ok(ipc::Role::Daemon(l)) => match app::run(image, &l) {
             Ok(()) => ExitCode::SUCCESS,
@@ -34,7 +34,7 @@ fn main() -> ExitCode {
                 fail(e.to_string())
             }
         },
-        Err(e) => fail(format!("wall socket: {e}")),
+        Err(e) => fail(format!("wallpaper socket: {e}")),
     }
 }
 
@@ -44,6 +44,6 @@ fn usage() -> ExitCode {
 }
 
 fn fail(msg: String) -> ExitCode {
-    eprintln!("wall: {msg}");
+    eprintln!("wallpaper: {msg}");
     ExitCode::FAILURE
 }

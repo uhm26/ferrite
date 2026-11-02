@@ -69,6 +69,7 @@ unsafe extern "C" {
     fn poll(fds: *mut PollFd, nfds: u64, timeout: c_int) -> c_int;
     // malloc.h (glibc)
     fn malloc_trim(pad: usize) -> c_int;
+    fn mallopt(param: c_int, value: c_int) -> c_int;
 }
 
 /// For libc-style calls that return -1 and set errno (kit/ffi.rs).
@@ -83,7 +84,7 @@ fn check(ret: c_int) -> io::Result<c_int> {
 /// An anonymous in-memory file (close-on-exec).
 pub fn memfd() -> io::Result<OwnedFd> {
     // SAFETY: the name is a valid NUL-terminated string; flags are valid.
-    let fd = check(unsafe { memfd_create(c"wall".as_ptr(), MFD_CLOEXEC) })?;
+    let fd = check(unsafe { memfd_create(c"wallpaper".as_ptr(), MFD_CLOEXEC) })?;
     // SAFETY: memfd_create returned a fresh fd that nothing else owns.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
@@ -146,6 +147,15 @@ pub fn send_with_fd(sock: RawFd, bytes: &[u8], fd: RawFd) -> io::Result<usize> {
 }
 
 /// Give freed heap memory back to the OS (glibc keeps it otherwise).
+/// glibc gives every thread that allocates its own heap (arena), kept for life. pix
+/// scales on all cores, so that is ~2 MB of idle RSS (4.7 vs 3.1 MB measured).
+/// One heap is enough: the workers allocate 2 small Vecs each per draw.
+pub fn one_heap() {
+    const M_ARENA_MAX: c_int = -8; // malloc.h
+    // SAFETY: mallopt only sets a glibc tuning knob; call before threads start.
+    unsafe { mallopt(M_ARENA_MAX, 1) };
+}
+
 pub fn trim_heap() {
     // SAFETY: malloc_trim only walks glibc's own heap; always safe to call.
     unsafe { malloc_trim(0) };

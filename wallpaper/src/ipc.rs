@@ -1,5 +1,5 @@
-//! One running `wall` per session. The first `wall <image>` becomes the daemon and
-//! listens on $XDG_RUNTIME_DIR/wall.sock; later calls send it the path and exit.
+//! One running `wallpaper` per session. The first `wallpaper <image>` becomes the daemon and
+//! listens on $XDG_RUNTIME_DIR/wallpaper.sock; later calls send it the path and exit.
 //! Protocol: client writes `<absolute path>\n`, daemon answers `ok\n` or `err <why>\n`.
 
 use std::ffi::OsString;
@@ -14,7 +14,7 @@ use std::time::Duration;
 const MAX_REQUEST: u64 = 4096;
 
 pub enum Role {
-    /// Another `wall` is running; this is a connection to it.
+    /// Another `wallpaper` is running; this is a connection to it.
     Client(UnixStream),
     /// We are the daemon.
     Daemon(UnixListener),
@@ -24,13 +24,13 @@ pub enum Role {
 fn socket_path() -> io::Result<PathBuf> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "XDG_RUNTIME_DIR is not set"))?;
-    Ok(PathBuf::from(dir).join("wall.sock"))
+    Ok(PathBuf::from(dir).join("wallpaper.sock"))
 }
 
 /// Connect to a running daemon, or become it.
 pub fn claim() -> io::Result<Role> {
     let path = socket_path()?;
-    // Held until we return, so two `wall`s starting together can't both take over a
+    // Held until we return, so two `wallpaper`s starting together can't both take over a
     // stale socket: the second waits, then finds the first one listening.
     let lock = File::create(path.with_extension("lock"))?;
     lock.lock()?;
@@ -81,7 +81,7 @@ pub fn accept(l: &UnixListener) -> io::Result<Option<Ask>> {
         };
         match read_path(&stream) {
             Ok(image) => return Ok(Some(Ask { image, stream })),
-            Err(e) => eprintln!("wall: dropped a client: {e}"),
+            Err(e) => eprintln!("wallpaper: dropped a client: {e}"),
         }
     }
 }
@@ -119,16 +119,16 @@ pub fn remove_socket() {
     }
 }
 
-/// $XDG_STATE_HOME/wall/last (default ~/.local/state/wall/last): the last shown image.
+/// $XDG_STATE_HOME/wallpaper/last (default ~/.local/state/wallpaper/last): the last shown image.
 fn state_path() -> Option<PathBuf> {
     let base = match std::env::var_os("XDG_STATE_HOME") {
         Some(d) => PathBuf::from(d),
         None => PathBuf::from(std::env::var_os("HOME")?).join(".local/state"),
     };
-    Some(base.join("wall/last"))
+    Some(base.join("wallpaper/last"))
 }
 
-/// Remember `image` for a bare `wall` (e.g. at login). Failing only costs that.
+/// Remember `image` for a bare `wallpaper` (e.g. at login). Failing only costs that.
 pub fn remember(image: &Path) {
     let Some(p) = state_path() else { return };
     let saved = p
@@ -136,7 +136,7 @@ pub fn remember(image: &Path) {
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::write(&p, image.as_os_str().as_encoded_bytes()));
     if let Err(e) = saved {
-        eprintln!("wall: can't remember the wallpaper in {}: {e}", p.display());
+        eprintln!("wallpaper: can't remember the wallpaper in {}: {e}", p.display());
     }
 }
 
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn bad_clients_are_dropped_not_fatal() {
-        let sock = std::env::temp_dir().join(format!("wall-test-{}.sock", std::process::id()));
+        let sock = std::env::temp_dir().join(format!("wallpaper-test-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&sock);
         let l = UnixListener::bind(&sock).unwrap();
         l.set_nonblocking(true).unwrap();

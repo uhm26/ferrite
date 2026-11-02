@@ -10,15 +10,18 @@ use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::image::{self, Rgb};
 use crate::wl::proto::{buffer, display, layer_surface, output, registry};
 use crate::wl::{self, Conn, Event, Global};
-use crate::{ipc, scale, shm, sys};
+use crate::{ipc, shm, sys};
+use pix::Rgb;
+
+/// What transparent pixels are blended onto: a wallpaper has nothing behind it.
+const BG: [u8; 3] = [0; 3];
 
 #[derive(Debug)]
 pub enum Error {
     Wayland(wl::Error),
-    Image(image::Error),
+    Image(pix::Error),
     Io(std::io::Error),
     Missing(&'static str),
 }
@@ -39,8 +42,8 @@ impl From<wl::Error> for Error {
         Error::Wayland(e)
     }
 }
-impl From<image::Error> for Error {
-    fn from(e: image::Error) -> Self {
+impl From<pix::Error> for Error {
+    fn from(e: pix::Error) -> Self {
         Error::Image(e)
     }
 }
@@ -91,8 +94,9 @@ struct App {
 
 /// Show `image` on every output and serve wallpaper changes until the compositor quits.
 pub fn run(image: PathBuf, listener: &UnixListener) -> Result<(), Error> {
+    sys::one_heap();
     let t = Instant::now();
-    let first = image::load(&image)?;
+    let first = pix::load(&image, BG)?;
     let decode = t.elapsed();
     let mut app = App::connect(image)?;
     app.draw(Some(first), decode)?;
@@ -110,7 +114,7 @@ fn survivable(r: Result<(), Error>) -> Result<(), Error> {
     match r {
         Err(Error::Wayland(e)) => Err(Error::Wayland(e)),
         Err(e) => {
-            eprintln!("wall: {e}");
+            eprintln!("wallpaper: {e}");
             Ok(())
         }
         Ok(()) => Ok(()),
@@ -394,7 +398,7 @@ impl App {
     /// Decode `image` and draw it on every output.
     fn switch(&mut self, image: &Path) -> Result<(), Error> {
         let t = Instant::now();
-        let img = image::load(image)?;
+        let img = pix::load(image, BG)?;
         self.image = image.to_path_buf();
         for surf in self.screens.iter_mut().filter_map(|s| s.surf.as_mut()) {
             surf.dirty = surf.size != (0, 0);
@@ -427,13 +431,13 @@ impl App {
             Some(img) => (img, decode),
             None => {
                 let t = Instant::now();
-                (image::load(&self.image)?, t.elapsed())
+                (pix::load(&self.image, BG)?, t.elapsed())
             }
         };
         let t = Instant::now();
         for ((w, h), screens) in &groups {
             let mut px = shm::Pixels::new(w * h * 4)?;
-            scale::cover(&img, *w, *h, px.as_u32_mut());
+            pix::cover(&img, *w, *h, px.as_u32_mut());
             let buf = self
                 .conn
                 .shm_buffer(self.shm, px.fd(), *w as i32, *h as i32)?;
@@ -450,7 +454,7 @@ impl App {
         self.conn.flush()?;
         let n: usize = groups.iter().map(|g| g.1.len()).sum();
         eprintln!(
-            "wall: {} on {n} output(s): {}x{} decode {:.1} ms, scale+upload {:.1} ms ({} buffer(s))",
+            "wallpaper: {} on {n} output(s): {}x{} decode {:.1} ms, scale+upload {:.1} ms ({} buffer(s))",
             self.image.display(),
             img.w,
             img.h,
