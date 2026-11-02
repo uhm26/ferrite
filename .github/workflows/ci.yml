@@ -1,0 +1,58 @@
+# Checks on every push and pull request: lints + tests for the whole workspace, and the
+# installer under dash (Ubuntu's /bin/sh, strict POSIX) with a fake release.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: System libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            libfontconfig-dev libfreetype-dev libxkbcommon-dev \
+            librsvg2-dev libcairo2-dev libglib2.0-dev libwebp-dev \
+            libmpv-dev libegl-dev libgbm-dev libarchive-tools
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - name: Clippy
+        run: cargo clippy -q --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test -q --workspace
+
+  installer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck
+        run: shellcheck --shell=sh install.sh
+      - name: Install a fake release under dash
+        run: |
+          set -eu
+          m="$RUNNER_TEMP/mirror/clipboard-v9.9.9"
+          a=clipboard-x86_64-linux-musl
+          mkdir -p "$m" "$RUNNER_TEMP/pkg/$a"
+          printf '#!/bin/sh\necho fake\n' > "$RUNNER_TEMP/pkg/$a/clipboard"
+          tar -C "$RUNNER_TEMP/pkg" -czf "$m/$a.tar.gz" "$a"
+          (cd "$m" && sha256sum "$a.tar.gz" > "$a.tar.gz.sha256")
+          bin="$RUNNER_TEMP/bin"
+          FERRITE_MIRROR="$RUNNER_TEMP/mirror" dash install.sh --version 9.9.9 --dir "$bin" clipboard
+          test "$("$bin/clipboard")" = fake
+          dash install.sh --dir "$bin" --uninstall clipboard
+          test ! -e "$bin/clipboard"
+          # A broken checksum must stop the install.
+          echo "0  $a.tar.gz" > "$m/$a.tar.gz.sha256"
+          if FERRITE_MIRROR="$RUNNER_TEMP/mirror" dash install.sh --version 9.9.9 --dir "$bin" clipboard; then
+            echo "installed despite a bad checksum" >&2; exit 1
+          fi
+          test ! -e "$bin/clipboard"
+          dash install.sh --help > /dev/null
+          if dash install.sh nope 2>/dev/null; then echo "unknown tool accepted" >&2; exit 1; fi
