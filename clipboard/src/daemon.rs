@@ -7,6 +7,14 @@ use crate::wl::proto::{self, display, manager, registry};
 use crate::wl::{Arg, Conn, Error, Event, Global};
 
 pub fn run() -> Result<(), Error> {
+    // One keeper per Wayland session: two would fight over the selection.
+    let _lock = match session_lock()? {
+        Some(lock) => lock,
+        None => {
+            eprintln!("clipboard: already running in this session");
+            return Ok(());
+        }
+    };
     let mut conn = Conn::connect()?;
     let (mgr, seat) = bind_globals(&mut conn)?;
     let device = conn.new_id();
@@ -89,4 +97,15 @@ fn bind_globals(conn: &mut Conn) -> Result<(u32, u32), Error> {
     let mgr = mgr.ok_or(Error::Missing("ext-data-control-v1 or wlr-data-control"))?;
     let seat = find("wl_seat").ok_or(Error::Missing("wl_seat"))?;
     Ok((conn.bind(reg, mgr, 1)?, conn.bind(reg, seat, 1)?))
+}
+
+/// Lock `$XDG_RUNTIME_DIR/clipboard-<display>.lock`. Some(file) = ours (keep it alive);
+/// None = another keeper runs in this session. Without a runtime dir there is no guard.
+fn session_lock() -> std::io::Result<Option<Option<std::fs::File>>> {
+    let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) else {
+        return Ok(Some(None));
+    };
+    let display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".into());
+    let name = format!("clipboard-{}.lock", display.replace('/', "_"));
+    Ok(sys::lock_file(&std::path::Path::new(&dir).join(name))?.map(Some))
 }

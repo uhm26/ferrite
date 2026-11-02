@@ -63,11 +63,13 @@ Errors and dropped copies are printed to stderr.
 
 ## Files
 
-`clipboard` writes no files. The kept copy lives in memory (an anonymous memory file).
+`clipboard` keeps the copy in memory (an anonymous memory file); the only file it makes is
+a small lock file, so a second start in the same session just says "already running".
 
 | Path | Use |
 |---|---|
 | `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` | The Wayland socket (`wayland-0` if `WAYLAND_DISPLAY` is unset) |
+| `$XDG_RUNTIME_DIR/clipboard-$WAYLAND_DISPLAY.lock` | One keeper per session (held while it runs, freed when it exits) |
 
 ## Requirements
 
@@ -90,7 +92,6 @@ Hyprland, sway and niri have it. GNOME does not, so `clipboard` does not work on
 - An app that sends nothing for 10 seconds while being read is given up on.
 - If an app is killed in the middle of sending a copy, the cut-off part is kept as if
   it were complete. The protocol carries no length, so this cannot be detected.
-- It does not check for a second running instance: start it only once.
 
 ## License
 

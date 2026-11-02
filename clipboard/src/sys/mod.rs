@@ -31,6 +31,26 @@ unsafe extern "C" {
     fn poll(fds: *mut PollFd, nfds: u64, timeout: c_int) -> c_int;
     fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
     fn pipe2(fds: *mut c_int, flags: c_int) -> c_int;
+    fn flock(fd: c_int, op: c_int) -> c_int;
+}
+
+/// Hold an exclusive lock on `path` for as long as the returned file lives (the kernel drops
+/// it when the process dies, so a crash leaves no stale lock). None: another process has it.
+pub fn lock_file(path: &std::path::Path) -> io::Result<Option<std::fs::File>> {
+    const LOCK_EX: c_int = 2; // sys/file.h
+    const LOCK_NB: c_int = 4;
+    const EWOULDBLOCK: i32 = 11;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    // SAFETY: `f` is an open file; flock only takes an advisory lock on it.
+    match check(unsafe { flock(f.as_raw_fd(), LOCK_EX | LOCK_NB) }) {
+        Ok(_) => Ok(Some(f)),
+        Err(e) if e.raw_os_error() == Some(EWOULDBLOCK) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// For libc-style calls that return -1 and set errno (kit/ffi.rs).
@@ -86,5 +106,22 @@ mod tests {
     #[test]
     fn struct_sizes_match_glibc() {
         assert_eq!(size_of::<PollFd>(), 8);
+    }
+
+    #[test]
+    fn lock_file_lets_only_one_holder_in() {
+        let path = std::env::temp_dir().join(format!("clipboard-lock-test-{}", std::process::id()));
+        let first = lock_file(&path).unwrap();
+        assert!(first.is_some());
+        assert!(
+            lock_file(&path).unwrap().is_none(),
+            "second holder must be refused"
+        );
+        drop(first);
+        assert!(
+            lock_file(&path).unwrap().is_some(),
+            "free again once the holder is gone"
+        );
+        std::fs::remove_file(&path).unwrap();
     }
 }
