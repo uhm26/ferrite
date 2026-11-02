@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build image and install it for this user: binary, desktop entry (PNG/JPEG handler), icon.
+# Build image and install it for this user: binary, desktop entry (handler for PNG, JPEG, GIF, WebP, SVG), icon.
 # The window's app_id is "image", so Hyprland and the launcher match it to image.desktop.
 set -eu
 cd "$(dirname "$0")"
