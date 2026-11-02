@@ -2,8 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// Extensions the decoders read (lowercase).
-const EXTS: [&str; 3] = ["png", "jpg", "jpeg"];
+/// Extensions pix reads (lowercase).
+const EXTS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
 
 fn is_image(p: &Path) -> bool {
     p.extension()

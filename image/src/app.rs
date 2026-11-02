@@ -1,5 +1,5 @@
-//! The window loop: input in, a frame out when something changed. Nothing animates,
-//! so idle sleeps in poll with no timeout (0 CPU). Loop from ../files/src/app.rs.
+//! The window loop: input in, a frame out when something changed. Idle (no glide,
+//! no animation) sleeps in poll with no timeout (0 CPU). Loop from ../files/src/app.rs.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -12,6 +12,7 @@ use frame::wl::proto::pointer;
 use frame::xkb::Key;
 
 use crate::show::Show;
+use crate::shape::Shape;
 use crate::view::STEP;
 
 /// Smooth-scroll px that count as one wheel click (frame's WHEEL_STEP).
@@ -26,6 +27,7 @@ struct App {
     drag: bool,
     quit: bool,
     titled: String,
+    shape: Shape,
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,6 +49,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         drag: false,
         quit: false,
         titled: String::new(),
+        shape: Shape::new((w, h)),
     };
     app.run()?;
     Ok(())
@@ -62,16 +65,24 @@ impl App {
             if self.quit {
                 return Ok(());
             }
+            dirty |= self.shape.turn(&mut self.win, self.show.size())?;
             if dirty && !self.win.frame_pending() && self.draw()? {
-                dirty = false;
+                dirty = self.show.view.moving(); // a glide draws on every frame callback
             }
             self.win.flush()?;
-            let timeout = self.win.next_deadline().map_or(-1, |at| {
+            // Wake for key repeat or the next animation frame, whichever is first.
+            let next = match (self.win.next_deadline(), self.show.due()) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            let timeout = next.map_or(-1, |at| {
                 at.saturating_duration_since(Instant::now()).as_millis() as i32
             });
             sys::wait(&mut [PollFd::new(self.win.fd(), POLLIN)], timeout)?;
             self.win.dispatch()?;
-            self.win.tick(Instant::now());
+            let now = Instant::now();
+            self.win.tick(now);
+            dirty |= self.show.tick(now);
         }
     }
 
@@ -80,7 +91,10 @@ impl App {
         let v = &mut self.show.view;
         match ev {
             Event::Close => self.quit = true,
-            Event::Resize(w, h) if w > 0 && h > 0 => self.win.set_size(w, h),
+            Event::Resize(w, h) if w > 0 && h > 0 => {
+                self.shape.resized(w, h);
+                self.win.set_size(w, h);
+            }
             Event::Key(k) => return self.key(&k),
             Event::Pointer(Pointer::Motion(x, y)) => {
                 if self.drag {
@@ -109,20 +123,50 @@ impl App {
     /// Keys (keysyms, xkbcommon-keysyms.h). True if it needs a redraw.
     fn key(&mut self, k: &Key) -> bool {
         let mid = (self.win.width as f64 / 2.0, self.win.height as f64 / 2.0);
+        let by = match k.sym {
+            0xff53 | 0x20 | 0xff56 => 1,    // Right, Space, Page_Down
+            0xff51 | 0xff08 | 0xff55 => -1, // Left, BackSpace, Page_Up
+            0xff50 => -isize::MAX,          // Home
+            0xff57 => isize::MAX,           // End
+            _ => 0,
+        };
         let s = &mut self.show;
+        let reshaped = match k.sym {
+            _ if by != 0 => s.step(by),
+            0x72 if !k.repeat => s.rotate(pix::CW),  // r
+            0x52 if !k.repeat => s.rotate(pix::CCW), // R
+            0xffff if !k.repeat => {
+                s.trash(); // Delete
+                true
+            }
+            _ => false,
+        };
+        if reshaped {
+            return true;
+        }
         match k.sym {
-            0x71 | 0xff1b => self.quit = true,             // q, Escape
-            0xff53 | 0x20 | 0xff56 => return s.step(1),    // Right, Space, Page_Down
-            0xff51 | 0xff08 | 0xff55 => return s.step(-1), // Left, BackSpace, Page_Up
-            0xff50 => return s.step(-isize::MAX),          // Home
-            0xff57 => return s.step(isize::MAX),           // End
-            0x2b | 0x3d | 0xffab => s.view.zoom_at(STEP, mid),  // + = KP_Add
-            0x2d | 0xffad => s.view.zoom_at(1.0 / STEP, mid),   // - KP_Subtract
-            0x30 | 0x66 => s.view.fit(),                        // 0, f
-            0x31 => s.view.actual(mid),                         // 1
+            0x63 if k.mods.ctrl && !k.repeat => self.copy(), // Ctrl+C
+            0x71 | 0xff1b => self.quit = true,               // q, Escape
+            0x2b | 0x3d | 0xffab => s.view.zoom_at(STEP, mid), // + = KP_Add
+            0x2d | 0xffad => s.view.zoom_at(1.0 / STEP, mid), // - KP_Subtract
+            0x30 | 0x66 => s.view.fit(mid),                  // 0, f
+            0x31 => s.view.actual(mid),                      // 1
             _ => return false,
         }
         true
+    }
+
+    /// Put the frame on screen on the clipboard as a PNG. It stays pasteable while
+    /// the viewer is open (no clipboard manager keeps it).
+    fn copy(&mut self) {
+        let done = self.show.png().and_then(|png| {
+            let w = &mut self.win;
+            w.copy_as(&["image/png"], png).map_err(|e| e.to_string())
+        });
+        self.show.note = match done {
+            Ok(()) => "copied".into(),
+            Err(e) => format!("can't copy: {e}"),
+        };
     }
 
     /// Draw a full frame into a free buffer. False if none is free yet.
@@ -137,6 +181,7 @@ impl App {
             w: c.w,
             h: c.h,
         };
+        self.show.view.animate(Instant::now());
         self.show.paint(c);
         self.win.present(i, &[full])?;
         let title = self.show.title();
