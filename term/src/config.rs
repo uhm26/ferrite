@@ -8,19 +8,19 @@ use std::path::PathBuf;
 
 use crate::color::{self, Palette, Theme};
 
-/// "Ash": the rice's grays plus low-chroma hues of similar lightness, so colored
-/// output reads calm on #0d0d0d. Yellow is the rice accent (sand).
+/// "Ash": near-black grays plus low-chroma hues of similar lightness, so colored
+/// output reads calm on #0d0d0d. Yellow is the one accent (sand).
 pub const ASH: Theme = Theme {
     ansi: [
         0x1e1e1e, // black
         0xc27272, // red: muted brick
         0x93a48b, // green: sage
-        0xd9c8af, // yellow: sand (the rice accent)
+        0xd9c8af, // yellow: sand (the accent)
         0x8c9cb0, // blue: slate
         0xab95aa, // magenta: mauve
         0x8ba7a5, // cyan: muted teal
         0xbcbcbc, // white
-        0x6a6a6a, // bright black: rice "dim" (fish autosuggestions)
+        0x6a6a6a, // bright black: "dim" gray (e.g. shell autosuggestions)
         0xd48d8d, 0xaabba2, 0xe8dcc8, 0xa6b3c4, 0xc2aec1, 0xa7c0be, 0xf0f0f0,
     ],
     fg: 0xd4d4d4,

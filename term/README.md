@@ -49,8 +49,8 @@ term [-e command [args...]]
 term --version
 ```
 
-Without `-e`, term starts your shell: `shell` from the config, else `fish` if it is on
-`PATH`, else `$SHELL`, else `/bin/sh`. With `-e`, the first tab runs the command instead.
+Without `-e`, term starts your shell: `shell` from the config, else your login shell
+(`$SHELL`), else `/bin/sh`. With `-e`, the first tab runs the command instead.
 New tabs always start the shell, in your home folder.
 
 ```sh
@@ -151,7 +151,8 @@ watched, so changes apply to every tab while term runs.
 
 Colors are `#rrggbb` or `rgb:r/g/b`.
 
-The window is opaque unless the file `$XDG_RUNTIME_DIR/rice/glass` contains `1`. Only then
+The window is opaque unless the file `$XDG_RUNTIME_DIR/ferrite/glass` contains `1` (a switch
+any ferrite tool or script can use, e.g. a bar toggle). Only then
 is `opacity` used. That file is watched too, so writing `1` or `0` to it switches
 transparency on and off live.
 
@@ -172,7 +173,7 @@ color1 = #d06060
 | Path | Use |
 |---|---|
 | `$XDG_CONFIG_HOME/term/config` | Settings (read, watched; the folder is created if missing) |
-| `$XDG_RUNTIME_DIR/rice/glass` | Transparency switch (read, watched; the folder is created if missing) |
+| `$XDG_RUNTIME_DIR/ferrite/glass` | Transparency switch (read, watched; the folder is created if missing) |
 | `$XDG_RUNTIME_DIR/term/paste-<time>.<ext>` | Pasted images; the newest 10 are kept |
 | `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` | Wayland socket (`wayland-0` if unset) |
 

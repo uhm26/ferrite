@@ -1,4 +1,4 @@
-//! wallpaper — a tiny, fast Wayland wallpaper daemon for the hypr rice.
+//! wallpaper — a tiny, fast Wayland wallpaper daemon.
 //!
 //! `wallpaper <image>` shows a PNG or JPEG on every monitor (wlr-layer-shell background
 //! layer, cover fit). The first call becomes the daemon; later calls hand it the new

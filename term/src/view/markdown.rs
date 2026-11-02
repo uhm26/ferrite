@@ -6,7 +6,7 @@
 
 use super::{Line, Span, Style};
 
-const ACCENT: u8 = 3; // sand (the rice accent)
+const ACCENT: u8 = 3; // sand (the accent)
 const DIM: u8 = 8;
 const BRIGHT: u8 = 15;
 const CODE_BG: u8 = 0;

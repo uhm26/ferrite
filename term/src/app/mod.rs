@@ -103,12 +103,12 @@ pub struct App {
     fds: Vec<PollFd>,
     /// Mouse button held since a press on the tab bar (left: drag to move).
     tab_press: Option<u32>,
-    /// Config file + rice glass switch, for live reloads.
+    /// Config file + glass switch, for live reloads.
     watch: Option<crate::sys::watch::Watch>,
 }
 
 impl App {
-    /// `command` empty: the configured shell (fish if installed).
+    /// `command` empty: the configured shell (else `$SHELL`).
     pub fn new(cfg: Config, command: Vec<String>) -> Result<Self, Error> {
         let stats = stats::Stats::default(); // first: startup counts from here
         let font = Font::new(&cfg.font, cfg.font_size).map_err(Error::Font)?;

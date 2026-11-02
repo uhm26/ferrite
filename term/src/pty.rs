@@ -45,12 +45,8 @@ pub fn home() -> std::path::PathBuf {
     std::env::var_os("HOME").map_or_else(|| "/".into(), Into::into)
 }
 
-/// fish if installed, else `$SHELL`, else /bin/sh.
+/// The user's login shell (`$SHELL`), else /bin/sh. The `shell` config key overrides it.
 pub fn default_shell() -> String {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    if std::env::split_paths(&path).any(|d| d.join("fish").is_file()) {
-        return "fish".into();
-    }
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())
 }
 

@@ -1,4 +1,4 @@
-//! The tab bar: a strip above the grid, shown with two or more tabs. Flat, rice
+//! The tab bar: a strip above the grid, shown with two or more tabs. Flat, monochrome
 //! style: surface background, 1 px hairlines, dim inactive titles. The active tab
 //! opens into the terminal below (same background, no bottom line); a short sand pill
 //! under its title is the one accent.
@@ -133,7 +133,7 @@ fn text(i: usize, title: &str) -> String {
 
 /// The active tab as a surface growing out of the terminal below: rounded top
 /// corners, and inverted corners at the bottom that flare into the terminal's
-/// edge (rice vision: edge-grown surfaces, inverted corners). Antialiased.
+/// edge (edge-grown surfaces, inverted corners). Antialiased.
 fn active_shape(canvas: &mut Canvas, r: Rect, (tab, bar): (u32, u32)) {
     let rad = CORNER.min(r.w / 2).min(r.h / 2);
     canvas.fill(r, tab);

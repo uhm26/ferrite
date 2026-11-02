@@ -19,7 +19,7 @@ fn main() -> ExitCode {
         }
     };
     term::sys::init_locale();
-    // Config file + the rice's glass switch; both stay watched while running.
+    // Config file + the glass switch; both stay watched while running.
     let cfg = term::app::settings();
     match App::new(cfg, command).and_then(|mut app| app.run()) {
         Ok(()) => ExitCode::SUCCESS,

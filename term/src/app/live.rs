@@ -1,7 +1,7 @@
-//! Live settings: `~/.config/term/config` and the rice's glass switch
-//! (`$XDG_RUNTIME_DIR/rice/glass`, "1" = glass, written by the bar's glass toggle) are
-//! watched; a change applies at once to every tab, no restart. Without the switch
-//! (or "0") term is solid, like the bar's default.
+//! Live settings: `~/.config/term/config` and the ferrite glass switch
+//! (`$XDG_RUNTIME_DIR/ferrite/glass`, "1" = glass) are watched; a change applies at once
+//! to every tab, no restart. Without the switch (or "0") term is solid. Any program
+//! (a bar, a keybind) can flip it: `echo 1 > "$XDG_RUNTIME_DIR/ferrite/glass"`.
 
 use std::path::PathBuf;
 
@@ -11,18 +11,18 @@ use crate::config::{self, Config};
 use crate::font::Font;
 use crate::sys::watch::Watch;
 
-/// The folder holding the rice-wide glass switch.
-pub(super) fn rice_dir() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("rice"))
+/// The folder holding the glass switch shared by ferrite tools.
+pub(super) fn switch_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(|d| PathBuf::from(d).join("ferrite"))
 }
 
 fn glass_on() -> bool {
-    rice_dir()
+    switch_dir()
         .and_then(|d| std::fs::read_to_string(d.join("glass")).ok())
         .is_some_and(|s| s.trim() == "1")
 }
 
-/// The config file's settings, made solid while the rice is not in glass mode.
+/// The config file's settings, made solid while the glass switch is off.
 pub fn load() -> Config {
     let (mut cfg, warnings) = Config::load();
     for w in &warnings {
@@ -34,11 +34,11 @@ pub fn load() -> Config {
     cfg
 }
 
-/// Watch the config folder and the rice folder. None if inotify is unavailable:
+/// Watch the config folder and the switch folder. None if inotify is unavailable:
 /// settings then simply stay as loaded.
 pub(super) fn watch() -> Option<Watch> {
     let cfg_dir = config::path()?.parent()?.to_path_buf();
-    let dirs: Vec<PathBuf> = [Some(cfg_dir), rice_dir()].into_iter().flatten().collect();
+    let dirs: Vec<PathBuf> = [Some(cfg_dir), switch_dir()].into_iter().flatten().collect();
     let refs: Vec<&std::path::Path> = dirs.iter().map(PathBuf::as_path).collect();
     Watch::new(&refs)
         .map_err(|e| eprintln!("term: no live settings: {e}"))
