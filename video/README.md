@@ -24,8 +24,8 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, no root; needs a 2024 or newer distro: glibc 2.39+ and libmpv.so.2, e.g.
-Arch, Fedora 40+, Ubuntu 24.04+, Debian 13). The installer also adds a menu entry and tells
+Prebuilt (x86_64 Linux, glibc 2.34+, no root; needs mpv 0.35 or newer, i.e. `libmpv.so.2`:
+Arch, Fedora 37+, Debian 12+, Ubuntu 23.04+). The installer also adds a menu entry and tells
 you which system libraries are missing, if any:
 
 ```sh
