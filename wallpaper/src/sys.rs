@@ -68,7 +68,9 @@ unsafe extern "C" {
     fn sendmsg(fd: c_int, msg: *const MsgHdr, flags: c_int) -> isize;
     fn poll(fds: *mut PollFd, nfds: u64, timeout: c_int) -> c_int;
     // malloc.h (glibc)
+    #[cfg(target_env = "gnu")]
     fn malloc_trim(pad: usize) -> c_int;
+    #[cfg(target_env = "gnu")]
     fn mallopt(param: c_int, value: c_int) -> c_int;
 }
 
@@ -150,15 +152,23 @@ pub fn send_with_fd(sock: RawFd, bytes: &[u8], fd: RawFd) -> io::Result<usize> {
 /// glibc gives every thread that allocates its own heap (arena), kept for life. pix
 /// scales on all cores, so that is ~2 MB of idle RSS (4.7 vs 3.1 MB measured).
 /// One heap is enough: the workers allocate 2 small Vecs each per draw.
+/// musl (static builds) has neither knob and needs neither: its allocator has no per-thread
+/// heaps and hands freed memory back on its own. Both are no-ops there.
 pub fn one_heap() {
-    const M_ARENA_MAX: c_int = -8; // malloc.h
-    // SAFETY: mallopt only sets a glibc tuning knob; call before threads start.
-    unsafe { mallopt(M_ARENA_MAX, 1) };
+    #[cfg(target_env = "gnu")]
+    {
+        const M_ARENA_MAX: c_int = -8; // malloc.h
+        // SAFETY: mallopt only sets a glibc tuning knob; call before threads start.
+        unsafe { mallopt(M_ARENA_MAX, 1) };
+    }
 }
 
 pub fn trim_heap() {
     // SAFETY: malloc_trim only walks glibc's own heap; always safe to call.
-    unsafe { malloc_trim(0) };
+    #[cfg(target_env = "gnu")]
+    unsafe {
+        malloc_trim(0)
+    };
 }
 
 /// Wait until one of `fds` is readable. Retries on EINTR.
