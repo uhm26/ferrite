@@ -18,6 +18,13 @@ printf '[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.files\nExec=%s
 # The running session bus only sees new service files after a reload (else "not activatable").
 busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig >/dev/null 2>&1 || true
 install -Dm644 resources/files.portal "$data/xdg-desktop-portal/portals/files.portal"
-install -Dm644 resources/hyprland-portals.conf "$config/xdg-desktop-portal/hyprland-portals.conf"
+# Never overwrite someone's portal setup: only add ours if they have none.
+portals_conf="$config/xdg-desktop-portal/hyprland-portals.conf"
+if [ -e "$portals_conf" ]; then
+    echo "kept your $portals_conf; to use files as the picker, add under [preferred]:"
+    echo "  org.freedesktop.impl.portal.FileChooser=files"
+else
+    install -Dm644 resources/hyprland-portals.conf "$portals_conf"
+fi
 echo "installed: ~/.local/bin/files, files.desktop, files.svg, file picker portal"
 echo "picker: restart the portal once (systemctl --user restart xdg-desktop-portal)"

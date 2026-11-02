@@ -62,7 +62,8 @@ Or run `files/install.sh`. It builds `files` and installs, for the current user:
   `$XDG_CONFIG_HOME/xdg-desktop-portal/hyprland-portals.conf`, which makes `files` the
   file chooser and leaves everything else to the Hyprland portal.
 
-It overwrites an existing `hyprland-portals.conf`. On another compositor, put
+If you already have a `hyprland-portals.conf`, it is kept and the script prints the line
+to add. On another compositor, put
 `org.freedesktop.impl.portal.FileChooser=files` under `[preferred]` in that desktop's
 `portals.conf`. Then run `systemctl --user restart xdg-desktop-portal` once.
 
