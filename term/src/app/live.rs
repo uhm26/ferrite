@@ -52,6 +52,9 @@ impl App {
         let palette = Palette::new(&cfg.theme);
         for s in &mut self.tabs {
             s.term.set_palette(palette.clone());
+            if let Some(sp) = s.split.as_mut() {
+                sp.term.set_palette(palette.clone());
+            }
         }
         self.renderer.set_theme(cfg.theme);
         self.renderer.pad = cfg.padding;

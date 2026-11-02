@@ -137,4 +137,5 @@ pub mod cursor_shape {
     pub const SET_SHAPE: u16 = 1;
     pub const SHAPE_DEFAULT: u32 = 1; // the normal arrow (owner: no I-beam)
     pub const SHAPE_POINTER: u32 = 4; // clickable element (tabs)
+    pub const SHAPE_COL_RESIZE: u32 = 30; // the split divider
 }

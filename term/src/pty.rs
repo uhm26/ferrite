@@ -126,6 +126,11 @@ impl Pty {
         (this.master.as_raw_fd(), this.pid)
     }
 
+    /// The shell's current folder (relative paths in its output are from here).
+    pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        std::fs::read_link(format!("/proc/{}/cwd", self.pid)).ok()
+    }
+
     pub fn fd(&self) -> BorrowedFd<'_> {
         self.master.as_fd()
     }

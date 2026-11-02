@@ -4,7 +4,10 @@
 //! the compared cells as extra flag bits, so they need no special tracking.
 
 pub mod draw;
+mod header;
 mod tabbar;
+
+pub use header::{Header, Hit};
 
 use crate::color::{self, Theme};
 use crate::font::{Font, GlyphCache};
@@ -18,6 +21,8 @@ const CURSOR_UNDERLINE: u32 = 1 << 17;
 const CURSOR_BEAM: u32 = 1 << 18;
 const CURSOR_HOLLOW: u32 = 1 << 19;
 const SELECTED: u32 = 1 << 20;
+/// Under the mouse and clickable (Ctrl+click): drawn with a wavy accent underline.
+const HOVER: u32 = 1 << 21;
 
 /// Never equal to a real cell: marks a [`Shown`] slot as "draw me".
 const STALE: Cell = Cell {
@@ -51,7 +56,7 @@ pub struct Selection {
 }
 
 impl Selection {
-    fn contains(&self, line: u64, col: usize) -> bool {
+    pub fn contains(&self, line: u64, col: usize) -> bool {
         (line, col) >= self.start && (line, col) <= self.end
     }
 }
@@ -59,6 +64,8 @@ impl Selection {
 pub struct View<'a> {
     pub focused: bool,
     pub selection: Option<Selection>,
+    /// The link or path under the mouse, if any.
+    pub hover: Option<Selection>,
     /// Tab titles; the bar shows when there are two or more.
     pub tabs: &'a [String],
     pub active_tab: usize,
@@ -70,6 +77,8 @@ pub struct Renderer {
     pub pad: usize,
     /// Pixels above the grid taken by the tab bar (0 = no bar).
     pub top: usize,
+    /// The pane's x-range in the window: (0, MAX) = all of it; a split narrows it.
+    pub span: (usize, usize),
     theme: Theme,
     row: Vec<Cell>,
 }
@@ -81,6 +90,7 @@ impl Renderer {
             cache: GlyphCache::default(),
             pad,
             top: 0,
+            span: (0, usize::MAX),
             theme,
             row: Vec::new(),
         }
@@ -129,14 +139,17 @@ impl Renderer {
                 w: canvas.w,
                 h: canvas.h,
             };
-            // Every cell gets drawn below; paint only the margins around the grid.
-            let (x1, y1) = (self.pad + cols * self.font.cell_w, self.pad + self.top + rows * self.font.cell_h);
-            let (y0, (w, h)) = (self.pad + self.top, (canvas.w, canvas.h));
+            // Every cell gets drawn below; paint only the margins around the grid, inside
+            // this pane's span (above `top` is the tab bar or the split header).
+            let (sx, ex) = (self.span.0, self.span.1.min(canvas.w));
+            let x1 = (sx + self.pad + cols * self.font.cell_w).min(ex);
+            let y1 = self.pad + self.top + rows * self.font.cell_h;
+            let (y0, h, w) = (self.pad + self.top, canvas.h, ex.saturating_sub(sx));
             for r in [
-                Rect { x: 0, y: 0, w, h: y0 },
-                Rect { x: 0, y: y1, w, h: h.saturating_sub(y1) },
-                Rect { x: 0, y: y0, w: self.pad, h: y1.saturating_sub(y0) },
-                Rect { x: x1, y: y0, w: w.saturating_sub(x1), h: y1.saturating_sub(y0) },
+                Rect { x: sx, y: self.top, w, h: self.pad },
+                Rect { x: sx, y: y1, w, h: h.saturating_sub(y1) },
+                Rect { x: sx, y: y0, w: self.pad, h: y1.saturating_sub(y0) },
+                Rect { x: x1, y: y0, w: ex - x1, h: y1.saturating_sub(y0) },
             ] {
                 canvas.fill(r, term.palette.bg_px());
             }
@@ -173,12 +186,14 @@ impl Renderer {
             .extend_from_slice(&src[..src.len().min(term.cols())]);
         self.row.resize(term.cols(), Cell::BLANK);
         let line = marks.first_line + y as u64;
-        if let Some(sel) = marks.selection
-            && (sel.start.0..=sel.end.0).contains(&line) // rows outside: no per-cell checks
-        {
-            for (x, c) in self.row.iter_mut().enumerate() {
-                if sel.contains(line, x) {
-                    c.flags.0 |= SELECTED;
+        for (range, bit) in [(marks.selection, SELECTED), (marks.hover, HOVER)] {
+            if let Some(sel) = range
+                && (sel.start.0..=sel.end.0).contains(&line) // rows outside: no per-cell checks
+            {
+                for (x, c) in self.row.iter_mut().enumerate() {
+                    if sel.contains(line, x) {
+                        c.flags.0 |= bit;
+                    }
                 }
             }
         }
@@ -225,7 +240,7 @@ impl Renderer {
     fn cell_rect(&self, x: usize, y: usize, n: usize) -> Rect {
         let (cw, ch) = (self.font.cell_w, self.font.cell_h);
         Rect {
-            x: self.pad + x * cw,
+            x: self.span.0 + self.pad + x * cw,
             y: self.pad + self.top + y * ch,
             w: n * cw,
             h: ch,
@@ -240,8 +255,8 @@ impl Renderer {
         (x, y, n): (usize, usize, usize),
     ) {
         let r = self.cell_rect(x, y, n);
-        if r.x >= canvas.w || r.y >= canvas.h {
-            return; // mid-resize the grid can be larger than the window
+        if r.x + r.w > self.span.1.min(canvas.w) || r.y >= canvas.h {
+            return; // mid-resize the grid can be larger than its pane: never draw past it
         }
         let (mut fg, mut bg) = colors(term, c);
         let f = c.flags.0;
@@ -271,6 +286,11 @@ impl Renderer {
         if c.flags.has(Flags::DOUBLE_UL) {
             canvas.fill(line(base), fg);
             canvas.fill(line((base + 2 * t).min(r.y + r.h - t)), fg);
+        }
+        if c.flags.0 & HOVER != 0 {
+            let h = (r.y + r.h).saturating_sub(base).max(t);
+            let accent = color::px(self.theme.cursor);
+            canvas.curly(Rect { y: base, h, ..r }, self.font.cell_w, t, accent);
         }
         if c.flags.has(Flags::CURLY_UL) {
             let h = (r.y + r.h).saturating_sub(base).max(t);
@@ -339,6 +359,7 @@ struct Marks {
     cursor: Option<(usize, usize)>,
     cursor_bits: u32,
     selection: Option<Selection>,
+    hover: Option<Selection>,
     /// Line number of visible row 0.
     first_line: u64,
 }
@@ -361,6 +382,7 @@ impl Marks {
             cursor: visible.then_some((row, c.col)),
             cursor_bits: CURSOR | shape,
             selection: view.selection,
+            hover: view.hover,
             first_line: term.history_pushed() - term.view.min(term.history_len()) as u64,
         }
     }
@@ -381,7 +403,7 @@ mod tests {
         t.feed("wide 漢字 text at the edge of the grid\r\n".repeat(40).as_bytes());
         let (w, h) = (300, 120);
         let mut px = vec![0u32; w * h];
-        let view = View { focused: true, selection: None, tabs: &[], active_tab: 0 };
+        let view = View { focused: true, selection: None, hover: None, tabs: &[], active_tab: 0 };
         let damage = r.draw(&t, &view, &mut Canvas { px: &mut px, w, h }, &mut Shown::default());
         assert!(!damage.is_empty());
         assert!(px.iter().any(|&p| p != 0));

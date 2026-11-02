@@ -133,7 +133,7 @@ impl Keyboard {
         }
     }
 
-    fn mods(&self) -> Mods {
+    pub fn mods(&self) -> Mods {
         let on = |name: &std::ffi::CStr| {
             // SAFETY: state is live; name is NUL-terminated.
             unsafe {

@@ -7,8 +7,10 @@
 mod input;
 mod live;
 mod mouse;
+mod open;
 mod restart;
 mod session;
+mod split;
 mod stats;
 mod tabbar;
 mod tabs;
@@ -39,7 +41,7 @@ const READ_BUDGET: usize = 4 << 20;
 const SYNC_TIMEOUT: Duration = Duration::from_millis(150);
 /// Quiet time after the last resize step before grids reflow and apps get SIGWINCH
 /// (foot's default resize-delay-ms is 100).
-const REGRID_DELAY: Duration = Duration::from_millis(100);
+pub(super) const REGRID_DELAY: Duration = Duration::from_millis(100);
 const READY: i16 = POLLIN | POLLHUP | POLLERR;
 /// Largest paste (text or image) we hold in memory.
 const MAX_PASTE: usize = 64 << 20;
@@ -89,6 +91,8 @@ pub struct App {
     resized: bool,
     /// When the grids follow the window size (see `resize`).
     regrid_at: Option<Instant>,
+    /// Where the split divider sits, as a share of the window width (dragged).
+    split_frac: f32,
     /// A paste in flight: the pipe, bytes so far, and the image mime if it is one.
     paste: Option<(File, Vec<u8>, Option<String>)>,
     mouse: mouse::Mouse,
@@ -121,6 +125,7 @@ impl App {
             redraw: true,
             resized: false,
             regrid_at: None,
+            split_frac: 0.5,
             paste: None,
             mouse: mouse::Mouse::default(),
             title: String::new(),
@@ -226,12 +231,32 @@ impl App {
         fds.clear();
         fds.push(PollFd::new(self.win.fd(), POLLIN));
         // fd -1 makes poll skip a slot: no paste running, or no live settings.
-        let none = PollFd { fd: -1, events: 0, revents: 0 };
-        fds.push(self.paste.as_ref().map_or(none, |(f, _, _)| PollFd::new(f.as_fd(), POLLIN)));
-        fds.push(self.watch.as_ref().map_or(none, |w| PollFd::new(w.fd(), POLLIN)));
+        let none = PollFd {
+            fd: -1,
+            events: 0,
+            revents: 0,
+        };
+        fds.push(
+            self.paste
+                .as_ref()
+                .map_or(none, |(f, _, _)| PollFd::new(f.as_fd(), POLLIN)),
+        );
+        fds.push(
+            self.watch
+                .as_ref()
+                .map_or(none, |w| PollFd::new(w.fd(), POLLIN)),
+        );
+        // Two slots per tab: its main pane, then its split (or a skipped slot).
+        // A viewer has no pty: its slot is skipped too.
+        let slot = |s: &Session| {
+            s.pty.as_ref().map_or(none, |p| {
+                let out = if p.wants_write() { POLLOUT } else { 0 };
+                PollFd::new(p.fd(), POLLIN | out)
+            })
+        };
         for s in &self.tabs {
-            let out = if s.pty.wants_write() { POLLOUT } else { 0 };
-            fds.push(PollFd::new(s.pty.fd(), POLLIN | out));
+            fds.push(slot(s));
+            fds.push(s.split.as_deref().map_or(none, slot));
         }
         let r = sys::wait(&mut fds, timeout);
         self.fds = fds;
@@ -244,7 +269,10 @@ impl App {
             return 0; // e.g. the first configure, queued while connecting
         }
         let now = Instant::now();
-        let sync = self.tabs[self.active].sync_since.map(|t| t + SYNC_TIMEOUT).filter(|t| *t > now);
+        let sync = self.tabs[self.active]
+            .sync_since
+            .map(|t| t + SYNC_TIMEOUT)
+            .filter(|t| *t > now);
         let soonest = [self.win.next_deadline(), sync, self.regrid_at];
         match soonest.into_iter().flatten().min() {
             Some(t) => t.saturating_duration_since(now).as_millis().min(1000) as i32 + 1,
@@ -260,29 +288,28 @@ impl App {
         let mut i = self.tabs.len();
         while i > 0 {
             i -= 1;
-            // Poll slots for tabs start at 3; a tab opened this turn has none yet.
-            let Some(fd) = self.fds.get(i + 3).copied() else {
+            // Poll slots: 3 + 2i main pane, 4 + 2i split; a tab opened this turn has none.
+            let Some(fd) = self.fds.get(3 + 2 * i).copied() else {
                 continue;
             };
-            let s = &mut self.tabs[i];
-            if fd.ready(POLLOUT) {
-                s.pty.flush();
-            }
-            if fd.ready(READY) {
-                let (n, alive) = s.read(buf, budget);
-                budget = budget.saturating_sub(n).max(64 << 10);
-                self.stats.bytes += n as u64;
-                if n > 0 {
-                    self.stats.output();
+            let (n, alive) = self.tabs[i].pump(fd, buf, budget);
+            self.count(n, &mut budget);
+            if !alive {
+                if !self.main_exited(i)? {
+                    return Ok(false);
                 }
+                continue;
+            }
+            let split_fd = self.fds.get(4 + 2 * i).copied();
+            if let (Some(fd), Some(sp)) = (split_fd, self.tabs[i].split.as_mut()) {
+                let (n, alive) = sp.pump(fd, buf, budget);
+                self.count(n, &mut budget);
                 if !alive {
-                    if !self.close_tab(i)? {
-                        return Ok(false);
-                    }
-                    continue;
+                    self.close_split(i);
                 }
             }
-            titles |= self.tabs[i].settle();
+            let tab = &mut self.tabs[i];
+            titles |= tab.settle() | tab.split.as_mut().is_some_and(|s| s.settle());
         }
         if titles {
             self.refresh_labels();
@@ -292,9 +319,20 @@ impl App {
         Ok(true)
     }
 
+    /// Bookkeeping for `n` bytes just read: the shared budget and stats.
+    fn count(&mut self, n: usize, budget: &mut usize) {
+        *budget = budget.saturating_sub(n).max(64 << 10);
+        self.stats.bytes += n as u64;
+        if n > 0 {
+            self.stats.output();
+        }
+    }
+
     /// Returns false when the window should go away.
     fn handle(&mut self, ev: Event) -> Result<bool, Error> {
         match ev {
+            // A file with unsaved edits holds the window open once (its header says so).
+            Event::Close if self.keep_unsaved(None) => {}
             Event::Close => return Ok(false),
             Event::Resize(w, h) => {
                 // Every configure is acked; answer it with a commit even if nothing changed.
@@ -342,46 +380,30 @@ impl App {
         self.redraw = true;
     }
 
-    /// Fit every tab's grid to the window now and tell the apps.
-    fn regrid(&mut self) {
-        self.regrid_at = None;
-        let (cw, ch) = (self.renderer.font.cell_w, self.renderer.font.cell_h);
-        let (cols, rows) = self.renderer.grid_for(self.win.width, self.win.height);
-        for s in &mut self.tabs {
-            s.resize(cols, rows, (cw, ch));
-        }
-        self.mouse.clear_selection();
-        self.redraw = true;
-    }
-
     fn draw(&mut self) -> Result<(), Error> {
-        let s = &self.tabs[self.active];
+        let t = &self.tabs[self.active];
+        let panes = || std::iter::once(t).chain(t.split.as_deref());
+        let dirty = panes().any(|s| s.term.dirty);
         let waiting = self.win.frame_pending() && !self.resized;
-        if !(s.term.dirty || self.redraw) || waiting || self.win.width == 0 {
+        if !(dirty || self.redraw) || waiting || self.win.width == 0 {
             return Ok(());
         }
-        if s.sync_since.is_some_and(|t| t.elapsed() < SYNC_TIMEOUT) {
+        if panes().any(|s| s.sync_since.is_some_and(|t| t.elapsed() < SYNC_TIMEOUT)) {
             return Ok(());
         }
-        if s.term.recolor {
+        if panes().any(|s| s.term.recolor) {
             self.win.invalidate_buffers();
-            self.tabs[self.active].term.recolor = false;
         }
         let Some(i) = self.win.acquire()? else {
             return Ok(()); // all buffers busy: retry on release
         };
-        let view = View {
-            focused: self.focused,
-            selection: self.mouse.selection(),
-            tabs: &self.labels,
-            active_tab: self.active,
-        };
-        let (mut canvas, shown) = self.win.canvas(i);
         let t0 = Instant::now();
-        let term = &self.tabs[self.active].term;
-        let damage = self.renderer.draw(term, &view, &mut canvas, shown);
+        let damage = self.paint(i);
         self.stats.add_frame(t0.elapsed());
-        self.tabs[self.active].term.dirty = false;
+        let t = &mut self.tabs[self.active];
+        for s in std::iter::once(&mut t.term).chain(t.split.as_mut().map(|s| &mut s.term)) {
+            (s.dirty, s.recolor) = (false, false);
+        }
         self.redraw = false;
         let resized = std::mem::take(&mut self.resized);
         if !damage.is_empty() || resized {
@@ -389,6 +411,55 @@ impl App {
             self.stats.presented();
         }
         Ok(())
+    }
+
+    /// Draw the active tab into buffer `i`: the main pane, then the split (right of
+    /// a hairline, under its header). Keys go to one pane; only it shows a solid
+    /// cursor and the selection. Returns damage.
+    fn paint(&mut self, i: usize) -> Vec<crate::render::draw::Rect> {
+        let split_x = self.split_x();
+        let sel = self.mouse.selection();
+        let hover = |split: bool| self.mouse.hover.filter(|h| h.0 == split).map(|h| h.1);
+        let (main_hover, split_hover) = (hover(false), hover(true));
+        let (mut canvas, shown) = self.win.canvas(i);
+        let t = &self.tabs[self.active];
+        let on_split = t.focus_split && split_x.is_some();
+        let r = &mut self.renderer;
+        let view = View {
+            focused: self.focused && !on_split,
+            selection: sel.filter(|_| !on_split),
+            hover: main_hover,
+            tabs: &self.labels,
+            active_tab: self.active,
+        };
+        r.span = (0, split_x.map_or(usize::MAX, |x| x - 1));
+        let mut damage = r.draw(&t.term, &view, &mut canvas, &mut shown[0]);
+        if let (Some(x), Some(sp)) = (split_x, t.split.as_deref()) {
+            let view = View {
+                focused: self.focused && on_split,
+                selection: sel.filter(|_| on_split),
+                hover: split_hover,
+                tabs: &[],
+                active_tab: 0,
+            };
+            let (top, w) = (r.top, canvas.w);
+            (r.span, r.top) = ((x, usize::MAX), top + r.bar_height());
+            damage.extend(r.draw(&sp.term, &view, &mut canvas, &mut shown[1]));
+            r.top = top;
+            let doc = sp.doc.as_ref();
+            let title = sp.label();
+            let header = crate::render::Header {
+                term: &sp.term,
+                title: &title,
+                focused: on_split,
+                dirty: doc.is_some_and(|d| d.buf.dirty()),
+                note: doc.map_or("", |d| d.note.as_str()),
+                toggle: doc.and_then(crate::view::Doc::toggle),
+            };
+            damage.extend(r.pane_header(&mut canvas, &header, (x, w), &mut shown[1]));
+        }
+        r.span = (0, usize::MAX);
+        damage
     }
 
     fn read_paste(&mut self) {

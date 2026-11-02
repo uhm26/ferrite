@@ -9,7 +9,7 @@ use crate::color::{self, px};
 use crate::term::Term;
 
 /// Space above and below the title text, px.
-const PAD_Y: usize = 4; // 4-grid (ui skill)
+pub(super) const PAD_Y: usize = 4; // 4-grid (ui skill)
 /// Widest a tab gets, in cells (text plus one cell of space on each side).
 const MAX_TAB_CELLS: usize = 24;
 /// Height of the accent pill under the active tab's title, px.
@@ -98,7 +98,7 @@ impl Renderer {
 
     /// One tab's text, one cell in from the left, cut with `…` if too long.
     /// Returns how many cells it took.
-    fn label(&mut self, canvas: &mut Canvas, r: Rect, text: &str, (fg, bg): (u32, u32)) -> usize {
+    pub(super) fn label(&mut self, canvas: &mut Canvas, r: Rect, text: &str, (fg, bg): (u32, u32)) -> usize {
         let (cw, ch) = (self.font.cell_w, self.font.cell_h);
         let room = r.w.saturating_sub(2 * cw) / cw;
         if room == 0 {
@@ -115,7 +115,7 @@ impl Renderer {
             }
             let cell = Rect {
                 x: r.x + cw * (k + 1),
-                y: PAD_Y,
+                y: r.y + PAD_Y,
                 w: cw,
                 h: ch,
             };

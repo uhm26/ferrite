@@ -13,6 +13,7 @@ pub mod pty;
 pub mod render;
 pub mod sys;
 pub mod term;
+pub mod view;
 pub mod vt;
 pub mod window;
 pub mod wl;

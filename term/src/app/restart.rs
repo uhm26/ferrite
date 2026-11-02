@@ -40,6 +40,9 @@ impl App {
     /// Exec the installed binary with our tabs. Only returns if that failed; the
     /// tabs are then taken back as they were.
     pub(super) fn restart(&mut self) -> Result<(), Error> {
+        if self.keep_unsaved(None) {
+            return Ok(()); // files are not carried over: their edits would be lost
+        }
         self.finish_rename()?;
         let mut saved = Saved {
             active: self.active,
@@ -50,7 +53,10 @@ impl App {
             let screen = s.term.dump();
             let size = (s.term.cols() as u16, s.term.rows() as u16);
             let (name, title) = (s.name, s.title);
-            let (fd, pid) = s.pty.hand_over();
+            let Some(pty) = s.pty else {
+                continue; // only shells survive a restart; viewers are reopened by hand
+            };
+            let (fd, pid) = pty.hand_over();
             let tab = SavedTab {
                 fd,
                 pid,

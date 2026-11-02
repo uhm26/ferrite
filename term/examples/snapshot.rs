@@ -46,6 +46,10 @@ fn main() {
             start: (6, 50),
             end: (6, 67),
         }),
+        hover: Some(Selection {
+            start: (8, 0),
+            end: (8, 14),
+        }),
         tabs: &tabs,
         active_tab: 1,
     };

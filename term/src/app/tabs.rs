@@ -21,7 +21,7 @@ impl App {
 
     /// Close tab `i`. Returns false when it was the last one.
     pub(super) fn close_tab(&mut self, i: usize) -> Result<bool, Error> {
-        if i >= self.tabs.len() {
+        if i >= self.tabs.len() || self.keep_unsaved(Some(i)) {
             return Ok(true);
         }
         self.tabs.remove(i);

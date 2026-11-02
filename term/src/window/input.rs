@@ -173,6 +173,11 @@ impl Window {
         self.events.push_back(Event::Key(x.key(key)));
     }
 
+    /// Ctrl is held right now (for Ctrl+click).
+    pub fn ctrl_held(&self) -> bool {
+        self.input.xkb.as_ref().is_some_and(|x| x.mods().ctrl)
+    }
+
     /// Show cursor `shape` (`proto::cursor_shape::SHAPE_*`) while over our window.
     pub fn set_cursor(&mut self, shape: u32) {
         let i = &mut self.input;

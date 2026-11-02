@@ -10,6 +10,7 @@
 //! | Ctrl+Shift+R         | restart in place (new build, tabs kept) |
 //!
 //! Switching tabs is mouse only (click a tab; middle click closes it).
+//! In a file pane, editing keys (Ctrl+S, Ctrl+Z, ...) live in `view/editor.rs`.
 
 use super::{App, Error};
 use crate::keys;
@@ -58,12 +59,15 @@ impl App {
             }
             return self.run_shortcut(s);
         }
-        let s = &mut self.tabs[self.active];
+        if self.doc_key(k)? {
+            return Ok(true);
+        }
+        let s = self.tabs[self.active].pane_mut();
         let Some(bytes) = keys::encode(k, s.term.modes.app_cursor) else {
             return Ok(true);
         };
         s.term.reset_view();
-        s.pty.write(&bytes);
+        s.write(&bytes);
         self.stats.key();
         if self.mouse.clear_selection() {
             self.redraw = true;
@@ -75,7 +79,10 @@ impl App {
         let size = self.renderer.font.size;
         match s {
             Shortcut::Copy => {
-                if let Some(text) = self.mouse.selected_text(&self.tabs[self.active].term) {
+                let pane = self.tabs[self.active].pane();
+                let doc = pane.doc.as_ref().filter(|d| d.mode == crate::view::Mode::Edit);
+                let text = doc.map_or_else(|| self.mouse.selected_text(&pane.term), |d| d.buf.selected_text());
+                if let Some(text) = text {
                     self.win.copy(text)?;
                 }
             }
@@ -118,18 +125,25 @@ impl App {
     /// Send pasted text: bracketed if the app asked, else newlines become CR.
     pub(super) fn paste_bytes(&mut self, data: &[u8]) {
         let text = String::from_utf8_lossy(data);
-        let s = &mut self.tabs[self.active];
+        let s = self.tabs[self.active].pane_mut();
+        if let Some(d) = s.doc.as_mut() {
+            if d.paste(&text) {
+                s.refresh();
+                self.redraw = true;
+            }
+            return; // a preview takes no paste
+        }
         s.term.reset_view();
         if s.term.modes.bracketed_paste {
             // A paste must not be able to end the bracket early. Dropping every ESC is the
             // only safe filter: removing just "ESC[201~" can be dodged by nesting it.
             let clean = text.replace('\x1b', "");
-            s.pty.write(b"\x1b[200~");
-            s.pty.write(clean.as_bytes());
-            s.pty.write(b"\x1b[201~");
+            s.write(b"\x1b[200~");
+            s.write(clean.as_bytes());
+            s.write(b"\x1b[201~");
         } else {
             let clean = text.replace("\r\n", "\r").replace('\n', "\r");
-            s.pty.write(clean.as_bytes());
+            s.write(clean.as_bytes());
         }
     }
 }
@@ -162,7 +176,10 @@ fn save_in(dir: &std::path::Path, data: &[u8], mime: &str) -> std::io::Result<st
     let mut old: Vec<_> = std::fs::read_dir(dir)?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("paste-")))
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("paste-"))
+        })
         .collect();
     old.sort(); // same-length millisecond names sort by time
     let extra = old.len().saturating_sub(KEEP_IMAGES);

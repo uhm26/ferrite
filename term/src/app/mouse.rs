@@ -3,13 +3,14 @@
 
 use std::time::{Duration, Instant};
 
+use super::session::Session;
 use super::{App, Error};
 use crate::render::Selection;
 use crate::term::cell::Flags;
 use crate::term::{Mouse as Mode, Term};
 use crate::window::Pointer;
+use crate::wl::proto::cursor_shape::{SHAPE_COL_RESIZE, SHAPE_DEFAULT, SHAPE_POINTER};
 use crate::wl::proto::pointer::{BTN_LEFT, BTN_MIDDLE, BTN_RIGHT};
-use crate::wl::proto::cursor_shape::{SHAPE_DEFAULT, SHAPE_POINTER};
 
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const WHEEL_LINES: i32 = 3;
@@ -19,7 +20,7 @@ const WORD_CHARS: &str = "@-./_~?&=%+#:";
 #[derive(Default)]
 pub(super) struct Mouse {
     pub x: f64,
-    y: f64,
+    pub y: f64,
     held: Option<u32>,
     anchor: Option<(u64, usize)>,
     head: (u64, usize),
@@ -28,6 +29,12 @@ pub(super) struct Mouse {
     smooth: f64,
     /// Last cell reported to the app (motion is only sent when it changes).
     reported: Option<(usize, usize)>,
+    /// The clickable link or path under the pointer (in the split: `true`).
+    pub hover: Option<(bool, Selection)>,
+    /// (pane, col, row) the hover was last worked out for.
+    pub hover_at: Option<(bool, usize, usize)>,
+    /// The split divider is being dragged.
+    pub divider: bool,
 }
 
 impl Mouse {
@@ -88,15 +95,38 @@ impl App {
         match p {
             Pointer::Motion(x, y) => {
                 (self.mouse.x, self.mouse.y) = (x, y);
-                let over_bar = y < self.renderer.top as f64;
-                self.win.set_cursor(if over_bar { SHAPE_POINTER } else { SHAPE_DEFAULT });
-                if self.dragging_tab() {
+                let hdr = self.renderer.top + self.renderer.bar_height();
+                let over_header = self
+                    .split_x()
+                    .is_some_and(|sx| x >= sx as f64 && y < hdr as f64);
+                self.update_hover();
+                let over_link = self.mouse.hover.is_some();
+                let clickable = y < self.renderer.top as f64 || over_header || over_link;
+                let shape = match () {
+                    _ if self.mouse.divider || self.on_divider(x, y) => SHAPE_COL_RESIZE,
+                    _ if clickable => SHAPE_POINTER,
+                    _ => SHAPE_DEFAULT,
+                };
+                self.win.set_cursor(shape);
+                if self.mouse.divider {
+                    self.drag_divider(x);
+                } else if self.dragging_tab() {
                     self.drag_tab();
                 } else {
                     self.motion();
                 }
             }
-            Pointer::Button { pressed: false, button } if self.tab_press == Some(button) => {
+            Pointer::Button { pressed: true, button: BTN_LEFT } if self.on_divider(self.mouse.x, self.mouse.y) => {
+                self.mouse.divider = true;
+            }
+            Pointer::Button { pressed: false, .. } if self.mouse.divider => {
+                self.mouse.divider = false;
+                self.regrid(); // the panes take their final size now
+            }
+            Pointer::Button {
+                pressed: false,
+                button,
+            } if self.tab_press == Some(button) => {
                 self.release_tab();
             }
             Pointer::Button {
@@ -105,9 +135,14 @@ impl App {
             } if self.on_bar() => {
                 return self.press_tab(button);
             }
+            Pointer::Button { pressed: true, .. }
+                if self.press_split_header((self.mouse.x, self.mouse.y)) => {}
             Pointer::Button { button, pressed } => {
                 if pressed {
                     self.finish_rename()?; // not on release: a right-click rename starts on press
+                    if let Some(sx) = self.split_x() {
+                        self.focus_pane(self.mouse.x >= sx as f64); // a click picks the pane
+                    }
                 }
                 self.button(button, pressed)?;
             }
@@ -122,41 +157,59 @@ impl App {
 
     /// The cell under the pointer (col, row), clamped to the grid.
     fn cell(&self) -> (usize, usize) {
+        self.cell_in(self.tabs[self.active].focus_split)
+    }
+
+    /// The active tab's split pane (`true`, if it has one) or its main pane.
+    pub(super) fn pane_in(&self, split: bool) -> &Session {
+        let t = &self.tabs[self.active];
+        t.split.as_deref().filter(|_| split).unwrap_or(t)
+    }
+
+    /// The cell under the pointer (col, row) in a pane, clamped to its grid.
+    pub(super) fn cell_in(&self, split: bool) -> (usize, usize) {
         let f = &self.renderer.font;
         let pad = self.renderer.pad as f64;
-        let top = self.renderer.top as f64;
+        // The pane's grid origin: the split sits right of its divider, below its header.
+        let split = self.split_x().filter(|_| split);
+        let left = split.unwrap_or(0) as f64;
+        let hdr = if split.is_some() {
+            self.renderer.bar_height()
+        } else {
+            0
+        };
+        let top = (self.renderer.top + hdr) as f64;
         let at = |v: f64, size: usize, max: usize| {
             (((v - pad) / size as f64).floor().max(0.0) as usize).min(max - 1)
         };
+        let term = &self.pane_in(split.is_some()).term;
         (
-            at(self.mouse.x, f.cell_w, self.tabs[self.active].term.cols()),
-            at(
-                self.mouse.y - top,
-                f.cell_h,
-                self.tabs[self.active].term.rows(),
-            ),
+            at(self.mouse.x - left, f.cell_w, term.cols()),
+            at(self.mouse.y - top, f.cell_h, term.rows()),
         )
     }
 
-    /// Line number (stable across scrolling) of visible row `y`.
-    fn line_of(&self, y: usize) -> u64 {
-        let t = &self.tabs[self.active].term;
-        t.history_pushed() - t.view.min(t.history_len()) as u64 + y as u64
+    /// Line number (stable across scrolling) of visible row `y` in the focused pane.
+    pub(super) fn line_of(&self, y: usize) -> u64 {
+        line_in(&self.tabs[self.active].pane().term, y)
     }
 
     fn reporting(&self) -> bool {
-        self.tabs[self.active].term.modes.mouse != Mode::Off
+        self.tabs[self.active].pane().term.modes.mouse != Mode::Off
     }
 
     fn motion(&mut self) {
         let (col, row) = self.cell();
         if self.reporting() {
-            let m = self.tabs[self.active].term.modes.mouse;
+            let m = self.tabs[self.active].pane().term.modes.mouse;
             let send = m == Mode::Motion || (m == Mode::Drag && self.mouse.held.is_some());
             if send && self.mouse.reported != Some((col, row)) {
                 let b = self.mouse.held.map_or(3, button_code) + 32;
                 self.report(b, (col, row), true);
             }
+            return;
+        }
+        if self.mouse.held == Some(BTN_LEFT) && self.doc_click((col, row), true, false) {
             return;
         }
         if self.mouse.held == Some(BTN_LEFT) && self.mouse.anchor.is_some() {
@@ -171,6 +224,11 @@ impl App {
     fn button(&mut self, button: u32, pressed: bool) -> Result<(), Error> {
         self.mouse.held = if pressed { Some(button) } else { None };
         let (col, row) = self.cell();
+        // Ctrl+click opens a link or path, also over apps that take the mouse.
+        if pressed && button == BTN_LEFT && self.win.ctrl_held() && self.ctrl_click((col, row)) {
+            self.mouse.held = None;
+            return Ok(());
+        }
         if self.reporting() {
             self.report(button_code(button), (col, row), pressed);
             return Ok(());
@@ -190,8 +248,11 @@ impl App {
             .last_click
             .is_some_and(|(t, p)| p == at && now - t < DOUBLE_CLICK);
         self.mouse.last_click = Some((now, at));
+        if self.doc_click((col, row), false, double) {
+            return Ok(());
+        }
         if double {
-            let (a, b) = word_bounds(&self.tabs[self.active].term, at);
+            let (a, b) = word_bounds(&self.tabs[self.active].pane().term, at);
             self.mouse.anchor = Some(a);
             self.mouse.head = b;
             self.mouse.word = true;
@@ -223,27 +284,33 @@ impl App {
             for _ in 0..lines.unsigned_abs().min(10) {
                 self.report(b, cell, true);
             }
-        } else if self.tabs[self.active].term.is_alt()
-            && self.tabs[self.active].term.modes.alt_scroll
+        } else if self.tabs[self.active].pane().term.is_alt()
+            && self.tabs[self.active].pane().term.modes.alt_scroll
         {
-            let key: &[u8] = match (lines < 0, self.tabs[self.active].term.modes.app_cursor) {
+            let key: &[u8] = match (
+                lines < 0,
+                self.tabs[self.active].pane().term.modes.app_cursor,
+            ) {
                 (true, true) => b"\x1bOA",
                 (true, false) => b"\x1b[A",
                 (false, true) => b"\x1bOB",
                 (false, false) => b"\x1b[B",
             };
             for _ in 0..lines.unsigned_abs() {
-                self.tabs[self.active].pty.write(key);
+                self.tabs[self.active].pane_mut().write(key);
             }
-        } else {
-            self.tabs[self.active].term.scroll_view(-(lines as isize));
+        } else if !self.doc_scroll(lines as isize) {
+            self.tabs[self.active]
+                .pane_mut()
+                .term
+                .scroll_view(-(lines as isize));
         }
     }
 
     /// Send one mouse event to the app, SGR (1006) or legacy encoding.
     fn report(&mut self, code: u8, (col, row): (usize, usize), pressed: bool) {
         self.mouse.reported = Some((col, row));
-        let msg = if self.tabs[self.active].term.modes.mouse_sgr {
+        let msg = if self.tabs[self.active].pane().term.modes.mouse_sgr {
             let end = if pressed { 'M' } else { 'm' };
             format!("\x1b[<{code};{};{}{end}", col + 1, row + 1).into_bytes()
         } else {
@@ -251,7 +318,7 @@ impl App {
             let enc = |v: usize| (v + 33).min(255) as u8;
             vec![0x1b, b'[', b'M', b + 32, enc(col), enc(row)]
         };
-        self.tabs[self.active].pty.write(&msg);
+        self.tabs[self.active].pane_mut().write(&msg);
     }
 }
 
@@ -286,4 +353,9 @@ fn word_bounds(term: &Term, at: (u64, usize)) -> ((u64, usize), (u64, usize)) {
         b += 1;
     }
     ((at.0, a), (at.0, b))
+}
+
+/// Line number (stable across scrolling) of visible row `y` in `t`.
+pub(super) fn line_in(t: &Term, y: usize) -> u64 {
+    t.history_pushed() - t.view.min(t.history_len()) as u64 + y as u64
 }

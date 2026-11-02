@@ -29,7 +29,8 @@ pub(super) struct Buffer {
     w: usize,
     h: usize,
     pub(super) busy: bool,
-    shown: Shown,
+    /// What each pane shows in this buffer: [main, split].
+    shown: [Shown; 2],
 }
 
 impl Buffer {
@@ -84,7 +85,7 @@ impl Window {
             w,
             h,
             busy: false,
-            shown: Shown::default(),
+            shown: Default::default(),
         });
         Ok(Some(self.buffers.len() - 1))
     }
@@ -112,7 +113,7 @@ impl Window {
     }
 
     /// The pixels of buffer `i` to draw into, and what it shows now.
-    pub fn canvas(&mut self, i: usize) -> (Canvas<'_>, &mut Shown) {
+    pub fn canvas(&mut self, i: usize) -> (Canvas<'_>, &mut [Shown; 2]) {
         let b = &mut self.buffers[i];
         let (w, h) = (b.w, b.h);
         let px = match &mut self.pool {
@@ -128,7 +129,7 @@ impl Window {
     /// Every buffer redraws fully next time (palette change, font change).
     pub fn invalidate_buffers(&mut self) {
         for b in &mut self.buffers {
-            b.shown.invalidate();
+            b.shown.iter_mut().for_each(Shown::invalidate);
         }
     }
 
