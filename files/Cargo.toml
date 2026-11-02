@@ -1,0 +1,16 @@
+[package]
+name = "files"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+frame = { path = "vendor/frame" } # our Wayland window + ui; snapshot, see vendor/frame.rev
+pix = { path = "vendor/pix" } # our image decode + resample for thumbnails (zune, gif inside); snapshot, see vendor/pix.rev
+
+[lints.clippy]
+too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

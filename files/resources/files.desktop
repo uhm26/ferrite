@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=files
+GenericName=File Manager
+Comment=Browse folders, Nemo layout
+Exec=files
+Icon=files
+Terminal=false
+Categories=System;FileTools;FileManager;
+Keywords=folder;explorer;manager;browse;nemo;
+StartupWMClass=files
