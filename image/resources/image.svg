@@ -1,0 +1,9 @@
+<!-- image icon: same tile as files.svg (dark surface, 1 px hairline), gray hills,
+     sand accent sun. Monochrome per the ui skill. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect x="4.5" y="6.5" width="55" height="51" rx="11" fill="#151515" stroke="#2a2a2a"/>
+  <rect x="15" y="18" width="34" height="28" rx="3" fill="#d4d4d4"/>
+  <path d="M15 41 L25 31 L33 39 L38 34 L49 45 V43 A3 3 0 0 1 46 46 H18 A3 3 0 0 1 15 43 Z"
+        fill="#151515" opacity="0.35"/>
+  <circle cx="40" cy="25" r="3" fill="#d9c8af"/>
+</svg>

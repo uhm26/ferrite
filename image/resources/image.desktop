@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=image
+GenericName=Image Viewer
+Comment=View PNG, JPEG, GIF, WebP and SVG images
+Exec=image %f
+Icon=image
+Terminal=false
+NoDisplay=false
+Categories=Graphics;Viewer;
+MimeType=image/png;image/jpeg;image/gif;image/webp;image/svg+xml;
+Keywords=picture;photo;viewer;png;jpg;gif;webp;svg;
+StartupWMClass=image
