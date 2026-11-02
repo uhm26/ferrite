@@ -24,7 +24,13 @@
 
 ## Install
 
-One-line installer: coming soon (see the [main README](../README.md)).
+Prebuilt (x86_64 Linux, no root; needs a 2024 or newer distro: glibc 2.39+ and libmpv.so.2, e.g.
+Arch, Fedora 40+, Ubuntu 24.04+, Debian 13). The installer also adds a menu entry and tells
+you which system libraries are missing, if any:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- video
+```
 
 Build from source (needs Rust stable and the libraries under [Requirements](#requirements)):
 

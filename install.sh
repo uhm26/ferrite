@@ -12,7 +12,7 @@ set -eu
 
 REPO="uhm26/ferrite"
 # Tools with prebuilt releases so far; the others: build from source (see README.md).
-PREBUILT="clipboard screenshot wallpaper"
+PREBUILT="term files image video screenshot wallpaper clipboard"
 ALL_TOOLS="term files image video screenshot wallpaper clipboard"
 
 say() { printf 'ferrite: %s\n' "$*"; }
@@ -71,7 +71,11 @@ asset_of() {
         x86_64 | amd64) ;;
         *) die "no prebuilt $1 for $(uname -m) yet; build it from source: https://github.com/$REPO#build-from-source" ;;
     esac
-    printf '%s-x86_64-linux-musl' "$1"
+    # No system libraries: static musl build. The rest link system libraries (glibc build).
+    case "$1" in
+        clipboard | screenshot | wallpaper) printf '%s-x86_64-linux-musl' "$1" ;;
+        *) printf '%s-x86_64-linux-gnu' "$1" ;;
+    esac
 }
 
 # Newest release tag of tool $1 (tags are <tool>-v<version>, newest first in the API).
@@ -113,7 +117,80 @@ install_one() {
     chmod 755 "$dir/.$tool.new"
     mv -f "$dir/.$tool.new" "$dir/$tool"
     say "installed $tool ${tag#"$tool"-v} to $dir/$tool"
+    install_menu_entry "$tool" "$tmp/$asset"
+    check_libs "$dir/$tool"
     notes_for "$tool"
+}
+
+# GUI tools ship a desktop entry + icon: app launchers and "open with" find them.
+# Exec gets the full path, since a session's PATH often lacks ~/.local/bin.
+install_menu_entry() {
+    [ -f "$2/$1.desktop" ] || return 0
+    data="${XDG_DATA_HOME:-$HOME/.local/share}"
+    mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
+    sed "s|^Exec=$1\$|Exec=$dir/$1|; s|^Exec=$1 |Exec=$dir/$1 |" "$2/$1.desktop" > "$data/applications/$1.desktop"
+    if [ -f "$2/$1.svg" ]; then cp "$2/$1.svg" "$data/icons/hicolor/scalable/apps/$1.svg"; fi
+    say "added a menu entry: $data/applications/$1.desktop"
+}
+
+# arch, debian, fedora or other, from /etc/os-release (read, not sourced).
+distro_family() {
+    ids=$(grep -E '^(ID|ID_LIKE)=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '\n' ' ')
+    case " $ids " in
+        *" arch "*) echo arch ;;
+        *" debian "* | *" ubuntu "*) echo debian ;;
+        *" fedora "* | *" rhel "*) echo fedora ;;
+        *) echo other ;;
+    esac
+}
+
+# Package providing library $1 on distro family $2 (the library name if unknown).
+pkg_for() {
+    case "$1" in
+        libfontconfig.so.1) a=fontconfig d=libfontconfig1 f=fontconfig ;;
+        libfreetype.so.6) a=freetype2 d=libfreetype6 f=freetype ;;
+        libxkbcommon.so.0) a=libxkbcommon d=libxkbcommon0 f=libxkbcommon ;;
+        librsvg-2.so.2) a=librsvg d=librsvg2-2 f=librsvg2 ;;
+        libcairo.so.2) a=cairo d=libcairo2 f=cairo ;;
+        libglib-2.0.so.0 | libgobject-2.0.so.0) a=glib2 d=libglib2.0-0 f=glib2 ;;
+        libwebpdemux.so.2) a=libwebp d=libwebpdemux2 f=libwebp ;;
+        libmpv.so.2) a=mpv d=libmpv2 f=mpv-libs ;;
+        libEGL.so.1) a=libglvnd d=libegl1 f=libglvnd-egl ;;
+        libgbm.so.1) a=mesa d=libgbm1 f=mesa-libgbm ;;
+        *) a=$1 d=$1 f=$1 ;;
+    esac
+    case "$2" in
+        arch) echo "$a" ;;
+        debian) echo "$d" ;;
+        fedora) echo "$f" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# Tell the user exactly what is missing for binary $1 to start (static ones need nothing).
+check_libs() {
+    has ldd || return 0
+    out=$(ldd "$1" 2>&1) || true
+    case "$out" in *"not a dynamic executable"* | *"statically linked"*) return 0 ;; esac
+    if printf '%s\n' "$out" | grep -q "GLIBC_.* not found"; then
+        say "warning: your system's glibc is older than this build needs; build from source instead: https://github.com/$REPO#build-from-source"
+        return 0
+    fi
+    missing=$(printf '%s\n' "$out" | awk '/not found/ {print $1}' | sort -u)
+    [ -n "$missing" ] || return 0
+    family=$(distro_family)
+    pkgs=""
+    for so in $missing; do
+        p=$(pkg_for "$so" "$family")
+        case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac
+    done
+    say "missing system libraries:" $missing
+    case "$family" in
+        arch) say "install them with: sudo pacman -S --needed$pkgs" ;;
+        debian) say "install them with: sudo apt install$pkgs" ;;
+        fedora) say "install them with: sudo dnf install$pkgs (mpv-libs comes from RPM Fusion)" ;;
+        *) say "install the packages that provide them ($pkgs ), then start $1 again" ;;
+    esac
 }
 
 notes_for() {
@@ -130,6 +207,12 @@ uninstall_one() {
         say "removed $dir/$1"
     else
         say "$1 is not installed in $dir"
+    fi
+    # Only the menu entry this installer wrote (it runs $dir/$1), never someone else's.
+    data="${XDG_DATA_HOME:-$HOME/.local/share}"
+    if grep -q "^Exec=$dir/$1\( \|\$\)" "$data/applications/$1.desktop" 2>/dev/null; then
+        rm -f "$data/applications/$1.desktop" "$data/icons/hicolor/scalable/apps/$1.svg"
+        say "removed its menu entry"
     fi
 }
 

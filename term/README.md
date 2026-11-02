@@ -33,7 +33,12 @@
 
 ## Install
 
-One-line installer: coming soon (see the [main README](../README.md)).
+Prebuilt (x86_64 Linux, glibc 2.35+, no root). The installer also adds a menu entry and tells
+you which system libraries are missing, if any:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term
+```
 
 Build from source:
 

@@ -11,22 +11,35 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    # Oldest supported runner: binaries built against its glibc run on newer distros too.
-    runs-on: ubuntu-22.04
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tool: ${{ steps.tag.outputs.tool }}
+      version: ${{ steps.tag.outputs.version }}
+      target: ${{ steps.tag.outputs.target }}
+      asset: ${{ steps.tag.outputs.asset }}
+      runner: ${{ steps.tag.outputs.runner }}
+      apt: ${{ steps.tag.outputs.apt }}
     steps:
       - uses: actions/checkout@v5
-
       - name: Read the tag
         id: tag
         run: |
           tag="$GITHUB_REF_NAME"
           tool="${tag%-v*}"
           version="${tag##*-v}"
-          # Tools without system libraries ship fully static (musl): they run on any Linux.
+          frame="libfontconfig-dev libfreetype-dev libxkbcommon-dev"
+          pix="librsvg2-dev libcairo2-dev libglib2.0-dev libwebp-dev"
           case "$tool" in
-            clipboard|screenshot|wallpaper) target=x86_64-unknown-linux-musl; short=x86_64-linux-musl ;;
-            *) echo "no release build for '$tool' yet" >&2; exit 1 ;;
+            # No system libraries: fully static (musl), runs on any Linux.
+            clipboard|screenshot|wallpaper)
+              target=x86_64-unknown-linux-musl; short=x86_64-linux-musl; runner=ubuntu-22.04; apt="" ;;
+            # System libraries: glibc build on the oldest runner, so it runs on newer distros too.
+            term) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame" ;;
+            files|image) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame $pix" ;;
+            # libmpv.so.2 (mpv >= 0.35) first ships in 24.04; 22.04 has libmpv.so.1.
+            video) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-24.04; apt="$frame libmpv-dev libegl-dev libgbm-dev" ;;
+            *) echo "no release build for '$tool'" >&2; exit 1 ;;
           esac
           grep -q "^version = \"$version\"$" "$tool/Cargo.toml" \
             || { echo "$tool/Cargo.toml is not at version $version" >&2; exit 1; }
@@ -35,36 +48,53 @@ jobs:
             echo "version=$version"
             echo "target=$target"
             echo "asset=$tool-$short"
+            echo "runner=$runner"
+            echo "apt=$apt"
           } >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: plan
+    runs-on: ${{ needs.plan.outputs.runner }}
+    env:
+      TOOL: ${{ needs.plan.outputs.tool }}
+      TARGET: ${{ needs.plan.outputs.target }}
+      ASSET: ${{ needs.plan.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: System libraries
+        if: needs.plan.outputs.apt != ''
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ${{ needs.plan.outputs.apt }}
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --target "${{ steps.tag.outputs.target }}"
+          rustup toolchain install stable --profile minimal --target "$TARGET"
           rustup default stable
 
       - name: Test
-        run: cargo test -q --release -p "${{ steps.tag.outputs.tool }}" --target "${{ steps.tag.outputs.target }}"
+        run: cargo test -q --release -p "$TOOL" --target "$TARGET"
 
       - name: Build
-        run: cargo build --release -p "${{ steps.tag.outputs.tool }}" --target "${{ steps.tag.outputs.target }}"
+        run: cargo build --release -p "$TOOL" --target "$TARGET"
 
       - name: Package
         run: |
-          tool="${{ steps.tag.outputs.tool }}"
-          asset="${{ steps.tag.outputs.asset }}"
-          mkdir -p "dist/$asset"
-          cp "target/${{ steps.tag.outputs.target }}/release/$tool" "$tool/README.md" \
-             LICENSE-MIT LICENSE-APACHE "dist/$asset/"
-          tar -C dist -czf "dist/$asset.tar.gz" "$asset"
-          (cd dist && sha256sum "$asset.tar.gz" > "$asset.tar.gz.sha256")
-          ls -l dist
+          mkdir -p "dist/$ASSET"
+          cp "target/$TARGET/release/$TOOL" "$TOOL/README.md" LICENSE-MIT LICENSE-APACHE "dist/$ASSET/"
+          # Desktop entry + icon for the GUI tools (install.sh puts them in place).
+          for f in "$TOOL/resources/$TOOL.desktop" "$TOOL/resources/$TOOL.svg"; do
+            if [ -f "$f" ]; then cp "$f" "dist/$ASSET/"; fi
+          done
+          tar -C dist -czf "dist/$ASSET.tar.gz" "$ASSET"
+          (cd dist && sha256sum "$ASSET.tar.gz" > "$ASSET.tar.gz.sha256")
+          ls -l dist "dist/$ASSET"
 
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/${{ steps.tag.outputs.asset }}.tar.gz" \
-            "dist/${{ steps.tag.outputs.asset }}.tar.gz.sha256" \
-            --title "${{ steps.tag.outputs.tool }} ${{ steps.tag.outputs.version }}" \
-            --notes "Install: \`curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- ${{ steps.tag.outputs.tool }}\`"
+          gh release create "$GITHUB_REF_NAME" "dist/$ASSET.tar.gz" "dist/$ASSET.tar.gz.sha256" \
+            --title "$TOOL ${{ needs.plan.outputs.version }}" \
+            --notes "Install: \`curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- $TOOL\`"

@@ -28,11 +28,12 @@ Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 Prebuilt binaries for x86_64 Linux, checked with SHA-256, installed to `~/.local/bin` (no root):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- clipboard
+curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term files    # any tools
 ```
 
-Prebuilt so far: `clipboard`, `screenshot`, `wallpaper`. The others: build from source (below). Run it again to
-update; `--uninstall` removes a tool, `--help` lists the options.
+Every tool is prebuilt. Run it again to update; `--uninstall` removes a tool (and its menu
+entry), `--help` lists the options. Tools that need system libraries tell you the exact
+packages to install for your distro.
 
 ## Build from source
 
