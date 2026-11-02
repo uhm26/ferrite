@@ -74,7 +74,7 @@ pub fn wait_readable(fd: BorrowedFd) -> io::Result<()> {
 /// An anonymous in-memory file (close-on-exec).
 pub fn memfd() -> io::Result<OwnedFd> {
     // SAFETY: the name is a valid NUL-terminated string; flags are valid.
-    let fd = check(unsafe { memfd_create(c"snap".as_ptr(), MFD_CLOEXEC) })?;
+    let fd = check(unsafe { memfd_create(c"screenshot".as_ptr(), MFD_CLOEXEC) })?;
     // SAFETY: memfd_create returned a fresh fd that nothing else owns.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }

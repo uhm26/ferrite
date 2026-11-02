@@ -1,5 +1,5 @@
 //! One run: parse args, capture, encode, write.
-//! Usage: snap [-o OUTPUT | -s] [FILE | -]   (default ~/Pictures/snap-<date>.png; - is stdout)
+//! Usage: screenshot [-o OUTPUT | -s] [FILE | -]   (default ~/Pictures/screenshot-<date>.png; - is stdout)
 //! -s: freeze the screen and pick a region or window; saved PNGs also go to the clipboard.
 
 use std::fmt;
@@ -20,7 +20,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Usage => write!(f, "usage: snap [-o OUTPUT | -s] [FILE | -]"),
+            Error::Usage => write!(f, "usage: screenshot [-o OUTPUT | -s] [FILE | -]"),
             Error::Capture(e) => write!(f, "{e}"),
             Error::Write(p, e) => write!(f, "{}: {e}", p.display()),
             Error::Encode(e) => write!(f, "encoding the PNG: {e}"),
@@ -119,10 +119,10 @@ fn open(file: Option<String>) -> (PathBuf, io::Result<File>) {
     }
 }
 
-/// ~/Pictures/snap-<local time>.png; never overwrites an older shot from the same second.
+/// ~/Pictures/screenshot-<local time>.png; never overwrites an older shot from the same second.
 fn new_file() -> (PathBuf, io::Result<File>) {
     let dir = PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Pictures");
-    let stem = format!("snap-{}", sys::local_time(c"%Y-%m-%d_%H-%M-%S"));
+    let stem = format!("screenshot-{}", sys::local_time(c"%Y-%m-%d_%H-%M-%S"));
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return (dir, Err(e));
     }

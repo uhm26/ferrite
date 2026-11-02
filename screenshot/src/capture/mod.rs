@@ -94,7 +94,7 @@ struct Output {
     y: i32,
 }
 
-/// One connection with the globals snap uses.
+/// One connection with the globals screenshot uses.
 pub struct Session {
     pub c: Conn,
     reg: u32,

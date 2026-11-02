@@ -63,7 +63,7 @@ impl Overlay {
             Arg::U(surf),
             Arg::U(shot.output),
             Arg::U(proto::layer_shell::LAYER_OVERLAY),
-            Arg::S("snap"),
+            Arg::S("screenshot"),
         ];
         c.send(k.layer_shell, proto::layer_shell::GET_LAYER_SURFACE, &args)?;
         use proto::layer_surface as ls;

@@ -1,4 +1,4 @@
-//! snap: a fast Wayland screenshot tool. 0 crates.
+//! screenshot: a fast Wayland screenshot tool. 0 crates.
 //!
 //! capture (wlr-screencopy into shm) → compose (outputs into one RGB canvas, row by
 //! row) → png (own encoder: stripes filtered and deflated on all cores) → file/stdout.

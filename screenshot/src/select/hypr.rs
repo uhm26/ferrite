@@ -46,7 +46,7 @@ fn request(cmd: &str) -> io::Result<String> {
         .join(sig)
         .join(".socket.sock");
     let mut s = UnixStream::connect(path)?;
-    // A stalled Hyprland must not hang snap: no windows is better than no screenshot.
+    // A stalled Hyprland must not hang screenshot: no windows is better than no screenshot.
     s.set_read_timeout(Some(std::time::Duration::from_millis(500)))?;
     s.write_all(cmd.as_bytes())?;
     let mut out = String::new();
