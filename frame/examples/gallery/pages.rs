@@ -4,7 +4,7 @@
 use frame::ui::motion::Tween;
 use frame::ui::text::{BOLD, MEDIUM, REGULAR, SEMIBOLD};
 use frame::ui::theme::*;
-use frame::ui::{Align, Icon, Ink, MenuEvent, MenuItem, Rect, Ui};
+use frame::ui::{Align, Icon, Ink, MenuEvent, MenuHot, MenuItem, Rect, Shell, Sidebar, Ui};
 
 use crate::debug::Stats;
 use crate::layout::{self, Flow, PAGES, ROW};
@@ -34,6 +34,7 @@ pub struct Gallery {
     pub quit: bool,
     pub debug: bool,
     pub page: usize,
+    pub side: Sidebar,
     scroll: f32,
     /// Bottom of the page content last frame, for the scroll limit.
     content_h: f32,
@@ -47,7 +48,7 @@ pub struct Gallery {
     drawer: Tween,
     /// The demo menu: where it is open and its highlighted item.
     menu: Option<(f32, f32)>,
-    menu_hot: Option<usize>,
+    menu_hot: MenuHot,
 }
 
 impl Gallery {
@@ -56,6 +57,7 @@ impl Gallery {
             quit: false,
             debug: false,
             page: 0,
+            side: layout::sidebar(),
             scroll: 0.0,
             content_h: 0.0,
             name: String::new(),
@@ -67,7 +69,7 @@ impl Gallery {
             drawer_open: false,
             drawer: Tween::new(0.0, DRAWER, DRAWER_CURVE),
             menu: None,
-            menu_hot: None,
+            menu_hot: MenuHot::default(),
         }
     }
 
@@ -80,26 +82,26 @@ impl Gallery {
     }
 
     pub fn draw(&mut self, ui: &mut Ui, stats: &Stats) {
-        let (w, h) = ui.p.size();
-        let window = ui.pal.window;
-        ui.p.clear(window);
         let shown = self.page;
-        let nav_w = layout::nav(ui, &mut self.page);
+        let nav_w = layout::nav(ui, &mut self.side, &mut self.page);
+        let shell = Shell::new(ui, nav_w, 0.0);
+        self.toolbar(ui, shell.toolbar);
+        status(ui, &shell);
         if self.page != shown {
             self.scroll = 0.0;
         }
-        let (x, cw) = layout::column(w, nav_w);
-        self.scroll = self.scroll.clamp(0.0, (self.content_h - h).max(0.0));
+        let area = shell.pane;
+        let (x, cw) = layout::column(area);
+        self.scroll = self.scroll.clamp(0.0, (self.content_h - area.h).max(0.0));
         // One spring per page: switching pages starts at that page's offset.
         let off = ui
             .spring(&format!("scroll/{}", self.page), self.scroll, GLIDE)
             .round();
-        let area = Rect::new(nav_w, 0.0, w - nav_w, h);
         ui.p.clip(Some(area));
         let mut f = Flow {
             x,
             w: cw,
-            y: S24 - off,
+            y: area.y + S24 - off,
         };
         f.title(ui, PAGES[self.page].1);
         match self.page {
@@ -111,20 +113,41 @@ impl Gallery {
             _ => self.motion(ui, &mut f),
         }
         ui.p.clip(None);
-        self.content_h = f.y + off;
+        self.content_h = f.y + off - area.y;
         let over = area.contains(ui.s.input.pos);
         ui.scroll_thumb(
             "scroll/thumb",
             area.inset(S4),
-            (off, h, self.content_h),
+            (off, area.h, self.content_h),
             over,
         );
-        self.drawer(ui, (nav_w, w), h);
+        self.drawer(ui, area);
         self.menu(ui);
         if self.debug {
+            let w = ui.p.size().0;
             stats.draw(ui, w);
         }
         self.keys(ui);
+    }
+
+    /// Back and forward step through the pages.
+    fn toolbar(&mut self, ui: &mut Ui, bar: Rect) {
+        let back = Rect::new(bar.x, bar.y, CONTROL_H, CONTROL_H);
+        if ui.icon_button("bar/back", back, Icon::Back, self.page > 0) {
+            self.page -= 1;
+        }
+        let forward = Rect {
+            x: back.x + CONTROL_H + S4,
+            ..back
+        };
+        if ui.icon_button(
+            "bar/forward",
+            forward,
+            Icon::Forward,
+            self.page + 1 < PAGES.len(),
+        ) {
+            self.page += 1;
+        }
     }
 
     /// Shortcuts, for keys no focused field took.
@@ -143,7 +166,7 @@ impl Gallery {
     }
 
     fn controls(&mut self, ui: &mut Ui, f: &mut Flow) {
-        let rows = f.group(ui, "Buttons", (4, ROW));
+        let rows = f.group(ui, "Buttons", (5, ROW));
         let c = layout::setting(ui, rows[0], ("Primary", "The one emphasis on a page"), 96.0);
         self.clicks += u32::from(ui.button("btn/primary", c, "Save", true));
         let c = layout::setting(
@@ -182,6 +205,13 @@ impl Gallery {
             &[Icon::List, Icon::Grid],
             &mut self.view,
         );
+        let c = layout::setting(
+            ui,
+            rows[4],
+            ("Hold to confirm", "For what can't be undone"),
+            168.0,
+        );
+        self.clicks += u32::from(ui.hold_button("btn/hold", c, "Hold to Delete", 1.0));
 
         self.switches(ui, f);
     }
@@ -219,7 +249,7 @@ impl Gallery {
         let c = layout::setting(ui, rows[1], ("Menu", "Grows from where it opens"), 96.0);
         if ui.button("btn/menu", c, "Open", false) {
             ui.forget("demo-menu/grow");
-            (self.menu, self.menu_hot) = (Some((c.x, c.y + c.h + S4)), None);
+            (self.menu, self.menu_hot) = (Some((c.x, c.y + c.h + S4)), MenuHot::default());
         }
     }
 
@@ -252,9 +282,9 @@ impl Gallery {
         }
 
         let places = [
-            (Icon::Home, "Home"),
-            (Icon::Documents, "Documents"),
-            (Icon::Download, "Downloads"),
+            (Icon::Home, "Home", 1.0),
+            (Icon::Documents, "Documents", 1.0),
+            (Icon::Download, "Downloads", 1.0),
         ];
         let rows = f.group(ui, "Navigation", (places.len(), CONTROL_H + 2.0));
         let raise = ui.pal.raise;
@@ -322,18 +352,19 @@ impl Gallery {
     }
 
     /// A surface that grows out of the bottom edge (height only, never sideways).
-    fn drawer(&mut self, ui: &mut Ui, (left, w): (f32, f32), h: f32) {
+    /// The drawer grows out of the pane's bottom edge.
+    fn drawer(&mut self, ui: &mut Ui, pane: Rect) {
         let t = ui.tween(&mut self.drawer, f32::from(self.drawer_open));
-        let dh = (t * DRAWER_H).round();
+        let dh = (t * DRAWER_H.min(pane.h)).round();
         if dh < 1.0 {
             return;
         }
-        let (x, cw) = layout::column(w, left);
+        let (x, cw) = layout::column(pane);
         // Taller than shown by the radius: its bottom corners stay below the edge.
-        let r = Rect::new(x, h - dh, cw, dh + R_PANEL);
+        let r = Rect::new(x, pane.y + pane.h - dh, cw, dh + R_PANEL);
+        ui.p.clip(Some(Rect { h: dh, ..r }));
         let fill = ui.pal.raise;
         ui.p.rect(r, R_PANEL, fill);
-        ui.p.clip(Some(Rect { h: dh, ..r }));
         let ink = ui.strong();
         ui.text(
             Rect::new(r.x + S16, r.y + S12, r.w - 2.0 * S16, 24.0),
@@ -350,7 +381,7 @@ impl Gallery {
             Align::Left,
         );
         let row = Rect::new(r.x + S8, r.y + 64.0, r.w - 2.0 * S8, CONTROL_H);
-        if ui.nav("drawer/close", row, (Icon::Close, "Close"), false) {
+        if ui.nav("drawer/close", row, (Icon::Close, "Close", 1.0), false) {
             self.drawer_open = false;
         }
         ui.p.clip(None);
@@ -480,7 +511,14 @@ impl Gallery {
         let Some(at) = self.menu else {
             return;
         };
+        let new = [
+            MenuItem::new("Text File", "", true),
+            MenuItem::new("Markdown File", "", true),
+            MenuItem::new("Shell Script", "", true),
+        ];
         let items = [
+            MenuItem::submenu("New", &new),
+            MenuItem::SEPARATOR,
             MenuItem::new("Open", "Return", true),
             MenuItem::SEPARATOR,
             MenuItem::new("Copy", "Ctrl+C", true),
@@ -490,11 +528,17 @@ impl Gallery {
         ];
         match ui.menu("demo-menu", at, &items, &mut self.menu_hot) {
             MenuEvent::Open => {}
-            MenuEvent::Picked(_) => {
-                self.clicks += 1;
-                self.menu = None;
-            }
+            MenuEvent::Picked(..) => self.clicks += 1, // it shrinks away by itself
             MenuEvent::Closed => self.menu = None,
         }
     }
+}
+
+/// The status line: the shortcuts on the left, the window size on the right.
+fn status(ui: &mut Ui, shell: &Shell) {
+    let (left, right) = shell.status_halves();
+    let small = ui.small();
+    ui.text(left, "G glass, M reduced motion, F12 debug", small, Align::Left);
+    let (w, h) = ui.p.size();
+    ui.text(right, &format!("{w}×{h}"), small, Align::Right);
 }

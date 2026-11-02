@@ -37,6 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return snapshot(out, &args);
     }
     let mut win: Window = Window::new("frame gallery", "frame-gallery", true)?;
+    // Smallest size the pages still lay out in (owner 2026-11-01: no tiny windows).
+    win.set_size_limits((640, 480), (0, 0))?;
     let (w, h) = win.configured_size();
     win.set_size(if w == 0 { 960 } else { w }, if h == 0 { 720 } else { h });
     let mut app = App {

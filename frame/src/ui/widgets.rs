@@ -219,6 +219,8 @@ impl Ui<'_> {
 
     /// The current item's surface, gliding to `to` instead of jumping between items
     /// (GLIDE), fading out where it was when `to` is None. Draw it before the items.
+    /// Only its position glides; its size follows `to` at once, so it keeps up with a
+    /// layout that animates on its own (a sidebar opening).
     pub fn slide(&mut self, name: &str, to: Option<Rect>, color: u32) {
         let key = super::ctx::id(name);
         if let Some(r) = to {
@@ -230,8 +232,7 @@ impl Ui<'_> {
         let shown = self.spring(&format!("{name}/shown"), f32::from(to.is_some()), SNAP);
         let x = self.spring(&format!("{name}/x"), r.x, GLIDE);
         let y = self.spring(&format!("{name}/y"), r.y, GLIDE);
-        let w = self.spring(&format!("{name}/w"), r.w, GLIDE);
-        let h = self.spring(&format!("{name}/h"), r.h, GLIDE);
+        let (w, h) = (r.w, r.h);
         if shown > 0.0 {
             self.p.rect(
                 Rect::new(x, y, w, h).round(),
@@ -242,9 +243,13 @@ impl Ui<'_> {
     }
 
     /// A navigation entry: icon and name, secondary until hovered or current.
-    /// An empty `label` draws the icon alone, centered (narrow sidebar). Pair it with
-    /// [`Ui::slide`] for the current entry's surface.
-    pub fn nav(&mut self, name: &str, r: Rect, (icon, label): (Icon, &str), current: bool) -> bool {
+    /// `open` (0-1) is how open a folding sidebar is: the name fades with it and, while
+    /// it glides, keeps its full width for the caller's clip to cut at the edge (no
+    /// ellipsis flicker); 0 or an empty `label` draws the icon alone. The icon keeps
+    /// its spot at the left inset, so it stays put while a sidebar glides (a
+    /// `CONTROL_H` wide row centers it). Pair it with [`Ui::slide`] for the
+    /// current entry's surface.
+    pub fn nav(&mut self, name: &str, r: Rect, (icon, label, open): (Icon, &str, f32), current: bool) -> bool {
         let r = r.round();
         let (clicked, hover, _) = self.feel(name, r, true);
         let cur = self.spring(name, f32::from(current), SNAP);
@@ -253,20 +258,19 @@ impl Ui<'_> {
         let bg = mix(CLEAR, pal.raise, hover * 0.6 * (1.0 - cur));
         self.p.rect(r, RADIUS, bg);
         let color = mix(pal.sub, pal.text, cur.max(hover));
-        if label.is_empty() {
-            self.icon(icon, r, ICON, color);
-            return clicked;
-        }
         let ib = Rect::new(r.x + S8, r.y, ICON, r.h);
         self.icon(icon, ib, ICON, color);
+        if label.is_empty() || open <= 0.0 {
+            return clicked;
+        }
         let tx = ib.x + ICON + S8;
-        let ink = self.strong().color(color);
-        self.text(
-            Rect::new(tx, r.y, r.x + r.w - S8 - tx, r.h),
-            label,
-            ink,
-            Align::Left,
-        );
+        let ink = self.strong().color(mix(CLEAR, color, open));
+        let room = if open >= 1.0 {
+            r.x + r.w - S8 - tx
+        } else {
+            self.s.text.width(label, ink).ceil()
+        };
+        self.text(Rect::new(tx, r.y, room, r.h), label, ink, Align::Left);
         clicked
     }
 
@@ -307,3 +311,90 @@ impl Ui<'_> {
 
 /// The hover end of the primary button: pure white, the only place it's used.
 const BRIGHT_WHITE: u32 = 0xffffffff;
+
+impl Ui<'_> {
+    /// A button for something that can't be undone: it fills while held and acts
+    /// only when full, after `secs` (ui skill §5, hold-to-fill). Letting go early
+    /// drains it. True once, the frame it fills; it waits for a release after.
+    pub fn hold_button(&mut self, name: &str, r: Rect, text: &str, secs: f32) -> bool {
+        let r = r.round();
+        let (_, hover, _) = self.feel(name, r, true);
+        // `clicked` registers the press so `held` sees it; its release does nothing.
+        let held = self.held(name);
+        let key = super::ctx::id(name);
+        let dt = self.dt();
+        let p = self.s.holds.entry(key).or_insert(0.0);
+        let mut fired = false;
+        if *p < 0.0 {
+            // Fired: stay empty until the button is let go.
+            *p = if held { -1.0 } else { 0.0 };
+        } else if held {
+            *p = (*p + dt / secs).min(1.0);
+            if *p >= 1.0 {
+                (*p, fired) = (-1.0, true);
+            }
+        } else {
+            *p = (*p - 3.0 * dt / secs).max(0.0);
+        }
+        let fill = p.max(0.0);
+        if held || fill > 0.0 {
+            self.redraw();
+        }
+        let pal = self.pal;
+        self.p.rect(r, RADIUS, mix(pal.raise, pal.hover, hover));
+        let label = Rect::new(r.x + S8, r.y, r.w - 2.0 * S8, r.h);
+        let ink = self.strong();
+        self.text(label, text, ink, Align::Center);
+        if fill > 0.0 {
+            // The filled part is the inverted emphasis, its label dark on light.
+            let part = Rect {
+                w: (r.w * fill).round(),
+                ..r
+            };
+            self.p.clip(Some(part));
+            self.p.rect(r, RADIUS, pal.text);
+            self.text(label, text, ink.color(WINDOW), Align::Center);
+            self.p.clip(None);
+        }
+        fired
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui::{Rect, State, Text, theme::FAMILY};
+    use crate::window::Canvas;
+
+    /// Held for its time it fires once; it doesn't fire again until let go.
+    #[test]
+    fn hold_button_fires_once_when_full() {
+        let mut s = State::new(Text::new(FAMILY).unwrap());
+        let mut px = vec![0u32; 200 * 40];
+        let r = Rect::new(0.0, 0.0, 200.0, 32.0);
+        let mut frame = |s: &mut State, down: Option<bool>| {
+            s.input.pos = (100.0, 16.0);
+            if let Some(d) = down {
+                s.input.button(d);
+            }
+            let mut ui = s.begin(
+                Canvas {
+                    px: &mut px,
+                    w: 200,
+                    h: 40,
+                },
+                0.25,
+            );
+            let fired = ui.hold_button("h", r, "Hold", 1.0);
+            ui.end();
+            fired
+        };
+        let fires: Vec<bool> = std::iter::once(frame(&mut s, Some(true)))
+            .chain((0..6).map(|_| frame(&mut s, None)))
+            .collect();
+        assert_eq!(fires.iter().filter(|&&f| f).count(), 1, "{fires:?}");
+        assert!(!fires[0] && !fires[2], "not before it is full");
+        frame(&mut s, Some(false));
+        let early = (0..2).any(|_| frame(&mut s, Some(true)));
+        assert!(!early, "a fresh hold starts empty");
+    }
+}

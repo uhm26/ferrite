@@ -1,13 +1,16 @@
 //! Our Wayland window: one xdg toplevel showing shm buffers. Turns protocol events
 //! into a few [`Event`]s for the app. Input lives in `input.rs`, copy/paste in
-//! `clipboard.rs`, the buffer pool in `buffers.rs`.
+//! `clipboard.rs`, drag and drop in `dnd.rs`, the buffer pool in `buffers.rs`.
 //! Copied into frame from ../term/src/window/mod.rs at term 7be66f5 (2026-11-01).
 
 mod buffers;
 mod clipboard;
+mod dnd;
 mod input;
+mod raw;
 
 use buffers::Buffer;
+pub use dnd::{ACTION_COPY, ACTION_MOVE, Drag, DragIcon};
 pub use input::Pointer;
 
 use std::collections::VecDeque;
@@ -42,7 +45,11 @@ pub enum Event {
     Close,
     Key(Key),
     Focus(bool),
+    /// Modifiers changed (Ctrl held for a click, …).
+    Mods(crate::xkb::Mods),
     Pointer(Pointer),
+    /// Drag and drop over us, or our own drag ending.
+    Drag(Drag),
 }
 
 /// Object ids of the globals we bound.
@@ -73,9 +80,16 @@ pub struct Window<S = ()> {
     pool: Option<buffers::Pool>,
     input: input::Input,
     clip: clipboard::Clipboard,
+    dnd: dnd::Dnd,
     events: VecDeque<Event>,
     globals: Vec<Global>,
     sync_cb: u32,
+    /// Objects the app made itself (raw.rs): their events wait in `foreign`.
+    claimed: Vec<u32>,
+    foreign: VecDeque<WlEvent>,
+    /// The last configure said fullscreen.
+    pub fullscreen: bool,
+    pending_fullscreen: bool,
 }
 
 impl<S: Default> Window<S> {
@@ -102,9 +116,14 @@ impl<S: Default> Window<S> {
             pool: None,
             input: input::Input::default(),
             clip: clipboard::Clipboard::default(),
+            dnd: dnd::Dnd::default(),
             events: VecDeque::new(),
             globals: Vec::new(),
             sync_cb: 0,
+            claimed: Vec::new(),
+            foreign: VecDeque::new(),
+            fullscreen: false,
+            pending_fullscreen: false,
         };
         w.roundtrip()?;
         w.bind_globals()?;
@@ -133,6 +152,7 @@ impl<S: Default> Window<S> {
                 *slot = self.conn.bind(reg, g, max)?;
             }
         }
+        self.globals = globals; // kept for `bind_global`
         for (id, name) in [
             (self.ids.compositor, "wl_compositor v4"),
             (self.ids.shm, "wl_shm"),
@@ -189,6 +209,10 @@ impl<S: Default> Window<S> {
     pub fn dispatch(&mut self) -> Result<(), Error> {
         while self.conn.read()? {}
         while let Some(ev) = self.conn.next_event()? {
+            if self.claimed.contains(&ev.obj) {
+                self.foreign.push_back(ev);
+                continue;
+            }
             self.handle(&ev)?;
         }
         Ok(())
@@ -222,6 +246,7 @@ impl<S: Default> Window<S> {
             (proto::DISPLAY, display::EV_DELETE_ID) => {
                 let id = a.u32()?;
                 self.clip.forget(id);
+                self.claimed.retain(|&c| c != id);
                 self.conn.release_id(id);
             }
             (proto::DISPLAY, _) => {}
@@ -254,6 +279,9 @@ impl<S: Default> Window<S> {
         if self.on_input(ev)? {
             return Ok(());
         }
+        if self.on_dnd_object(ev)? {
+            return Ok(());
+        }
         self.on_clipboard(ev)
     }
 
@@ -263,6 +291,8 @@ impl<S: Default> Window<S> {
             (true, toplevel::EV_CONFIGURE) => {
                 let (w, h) = (a.i32()?, a.i32()?);
                 self.pending_size = (w.max(0) as usize, h.max(0) as usize);
+                let states = a.array()?; // xdg_toplevel.state, 2 = fullscreen
+                self.pending_fullscreen = states.chunks(4).any(|s| s == 2u32.to_ne_bytes());
             }
             (true, toplevel::EV_CLOSE) => self.events.push_back(Event::Close),
             (false, xdg_surface::EV_CONFIGURE) => {
@@ -270,6 +300,7 @@ impl<S: Default> Window<S> {
                 self.conn
                     .send(self.xdg, xdg_surface::ACK_CONFIGURE, &[Arg::U(serial)])?;
                 let (w, h) = self.pending_size;
+                self.fullscreen = self.pending_fullscreen;
                 self.events.push_back(Event::Resize(w, h));
             }
             _ => {}
@@ -297,6 +328,21 @@ impl<S: Default> Window<S> {
     pub fn set_title(&mut self, title: &str) -> Result<(), Error> {
         self.conn
             .send(self.toplevel, toplevel::SET_TITLE, &[Arg::S(title)])
+    }
+
+    /// Smallest and largest size the compositor may give us (0 = no limit), from the
+    /// next commit. Equal limits make a floating window take that exact size: the way
+    /// a client resizes itself (Hyprland ignores a bigger or smaller buffer alone).
+    pub fn set_size_limits(
+        &mut self,
+        min: (usize, usize),
+        max: (usize, usize),
+    ) -> Result<(), Error> {
+        let arg = |(w, h): (usize, usize)| [Arg::I(w as i32), Arg::I(h as i32)];
+        self.conn
+            .send(self.toplevel, toplevel::SET_MIN_SIZE, &arg(min))?;
+        self.conn
+            .send(self.toplevel, toplevel::SET_MAX_SIZE, &arg(max))
     }
 
     /// The size buffers are made at from now on.

@@ -116,6 +116,8 @@ pub struct Painter<'a> {
     h: usize,
     /// x0, y0, x1, y1 in px, inside the canvas.
     clip: [usize; 4],
+    /// The outer limit every clip stays inside (see [`Painter::bound`]).
+    bound: [usize; 4],
 }
 
 impl<'a> Painter<'a> {
@@ -126,6 +128,7 @@ impl<'a> Painter<'a> {
             w: c.w,
             h: c.h,
             clip,
+            bound: clip,
         }
     }
 
@@ -140,12 +143,21 @@ impl<'a> Painter<'a> {
         (self.w as f32, self.h as f32)
     }
 
-    /// Paint only inside `r` from now on (None: the whole canvas).
+    /// Paint only inside `r` from now on (None: the whole canvas), within the bound.
     pub fn clip(&mut self, r: Option<Rect>) {
-        self.clip = match r {
-            None => [0, 0, self.w, self.h],
-            Some(r) => self.span(&r.round(), 0.0),
-        };
+        self.clip = self.bound;
+        if let Some(r) = r {
+            self.clip = self.span(&r.round(), 0.0);
+        }
+    }
+
+    /// Paint only inside `r` (None: the whole canvas), and keep every [`Painter::clip`]
+    /// inside it too, `clip(None)` included: a widget that clips itself can be drawn
+    /// partly hidden (a pane sliding in under an edge).
+    pub fn bound(&mut self, r: Option<Rect>) {
+        self.bound = [0, 0, self.w, self.h];
+        self.clip(r);
+        self.bound = self.clip;
     }
 
     /// Pixel bounds of `r` grown by `pad`, clipped.
@@ -223,6 +235,46 @@ impl<'a> Painter<'a> {
             let t = (d / blur).clamp(0.0, 1.0);
             alpha * (1.0 - t * t * (3.0 - 2.0 * t))
         });
+    }
+
+    /// Opaque ARGB pixels, `w * h` of them with the top left at `at`: corners rounded
+    /// by `rad`, at opacity `a` 0-1 (a picture fading in). Thumbnails, previews.
+    pub fn image(
+        &mut self,
+        at: (i32, i32),
+        (w, h): (usize, usize),
+        px: &[u32],
+        (rad, a): (f32, f32),
+    ) {
+        let r = Rect::new(at.0 as f32, at.1 as f32, w as f32, h as f32);
+        if px.len() < w * h || r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        let rad = rad.clamp(0.0, r.w.min(r.h) / 2.0);
+        let alpha = a.clamp(0.0, 1.0) * 255.0;
+        let [x0, y0, x1, y1] = self.span(&r, 0.0);
+        for y in y0..y1 {
+            let (py, src) = (y as f32 + 0.5, &px[(y as i32 - at.1) as usize * w..]);
+            let near_y = py - r.y < rad || r.y + r.h - py < rad;
+            for x in x0..x1 {
+                let pxf = x as f32 + 0.5;
+                // Only pixels in a corner's square can be cut by the rounding.
+                let corner = near_y && (pxf - r.x < rad || r.x + r.w - pxf < rad);
+                let edge = if corner {
+                    (0.5 - sdf(&r, rad, pxf, py)).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
+                let c = (edge * alpha + 0.5) as u32;
+                let s = src[(x as i32 - at.0) as usize] | 0xff00_0000;
+                let p = &mut self.px[y * self.w + x];
+                match c {
+                    0 => {}
+                    255.. => *p = s,
+                    c => *p = over(*p, s, c),
+                }
+            }
+        }
     }
 
     /// Blend `color` through an 8-bit coverage bitmap whose top-left is at `(x, y)`.
@@ -356,5 +408,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn image_rounds_corners_clips_and_fades() {
+        let (w, h) = (10, 8);
+        let mut px = vec![0xff00_0000u32; w * h];
+        let pic = vec![0x00ff_ffffu32; 6 * 6]; // alpha byte ignored: images are opaque
+        let mut p = canvas(&mut px, w, h);
+        p.clip(Some(Rect::new(0.0, 0.0, 8.0, 8.0)));
+        p.image((4, 1), (6, 6), &pic, (3.0, 1.0));
+        p.clip(None);
+        p.image((0, 0), (1, 1), &[0xffff_ffff], (0.0, 0.5));
+        assert_eq!(px[3 * w + 6], 0xffff_ffff, "inside: copied");
+        assert_eq!(px[w + 4], 0xff00_0000, "the rounded-off corner stays");
+        assert_eq!(px[3 * w + 9], 0xff00_0000, "clipped away");
+        assert_eq!(px[0] & 0xff, 0x80, "half opacity");
+    }
+
+    #[test]
+    fn clips_stay_inside_the_bound() {
+        let (w, h) = (8, 2);
+        let mut px = vec![0u32; w * h];
+        let mut p = canvas(&mut px, w, h);
+        p.bound(Some(Rect::new(2.0, 0.0, 4.0, 2.0)));
+        p.clip(None);
+        p.rect(Rect::new(0.0, 0.0, 8.0, 2.0), 0.0, 0xffff_ffff);
+        p.clip(Some(Rect::new(0.0, 0.0, 3.0, 2.0)));
+        let inside = (p.in_clip((2.5, 1.0)), p.in_clip((1.5, 1.0)));
+        p.bound(None);
+        p.clip(None);
+        let free = p.in_clip((0.5, 1.0));
+        assert_eq!(&px[..w], &[0, 0, !0, !0, !0, !0, 0, 0]);
+        assert_eq!(inside, (true, false));
+        assert!(free);
     }
 }

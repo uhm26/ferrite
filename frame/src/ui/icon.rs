@@ -35,6 +35,18 @@ pub enum Icon {
     Plus,
     Minus,
     Trash,
+    /// Media (vid): solid play/pause for weight, line speaker and corners.
+    Play,
+    Pause,
+    Volume,
+    Mute,
+    /// Go fullscreen / leave it.
+    Expand,
+    Shrink,
+    /// Recent files.
+    Clock,
+    /// Unmount and power off a drive.
+    Eject,
 }
 
 /// One stroke, in grid units.
@@ -149,6 +161,53 @@ const PLUS: &[Shape] = &[
     Line(&[(5.0, 12.0), (19.0, 12.0)]),
 ];
 const MINUS: &[Shape] = &[Line(&[(5.0, 12.0), (19.0, 12.0)])];
+const PLAY: &[Shape] = &[Solid(&[(7.0, 4.5), (19.5, 12.0), (7.0, 19.5)])];
+const PAUSE: &[Shape] = &[
+    Solid(&[(6.5, 5.0), (10.5, 5.0), (10.5, 19.0), (6.5, 19.0)]),
+    Solid(&[(13.5, 5.0), (17.5, 5.0), (17.5, 19.0), (13.5, 19.0)]),
+];
+const SPEAKER: [(f32, f32); 6] = [
+    (3.5, 9.5),
+    (7.5, 9.5),
+    (12.5, 5.0),
+    (12.5, 19.0),
+    (7.5, 14.5),
+    (3.5, 14.5),
+];
+const VOLUME: &[Shape] = &[
+    Loop(&SPEAKER),
+    Line(&[
+        (15.5, 9.0),
+        (16.7, 10.5),
+        (17.0, 12.0),
+        (16.7, 13.5),
+        (15.5, 15.0),
+    ]),
+    Line(&[
+        (18.0, 6.5),
+        (19.8, 9.0),
+        (20.5, 12.0),
+        (19.8, 15.0),
+        (18.0, 17.5),
+    ]),
+];
+const MUTE: &[Shape] = &[
+    Loop(&SPEAKER),
+    Line(&[(16.0, 9.5), (21.0, 14.5)]),
+    Line(&[(21.0, 9.5), (16.0, 14.5)]),
+];
+const EXPAND: &[Shape] = &[
+    Line(&[(4.0, 9.0), (4.0, 4.0), (9.0, 4.0)]),
+    Line(&[(15.0, 4.0), (20.0, 4.0), (20.0, 9.0)]),
+    Line(&[(20.0, 15.0), (20.0, 20.0), (15.0, 20.0)]),
+    Line(&[(9.0, 20.0), (4.0, 20.0), (4.0, 15.0)]),
+];
+const SHRINK: &[Shape] = &[
+    Line(&[(4.0, 9.0), (9.0, 9.0), (9.0, 4.0)]),
+    Line(&[(15.0, 4.0), (15.0, 9.0), (20.0, 9.0)]),
+    Line(&[(20.0, 15.0), (15.0, 15.0), (15.0, 20.0)]),
+    Line(&[(9.0, 20.0), (9.0, 15.0), (4.0, 15.0)]),
+];
 const TRASH: &[Shape] = &[
     Line(&[(4.0, 6.5), (20.0, 6.5)]),
     Line(&[(9.5, 6.5), (9.5, 3.5), (14.5, 3.5), (14.5, 6.5)]),
@@ -157,8 +216,17 @@ const TRASH: &[Shape] = &[
     Line(&[(14.0, 10.5), (14.0, 16.5)]),
 ];
 
+const CLOCK: &[Shape] = &[
+    Ring((12.0, 12.0), 8.5),
+    Line(&[(12.0, 7.5), (12.0, 12.0), (15.0, 14.0)]),
+];
+const EJECT: &[Shape] = &[
+    Loop(&[(12.0, 5.0), (19.0, 13.5), (5.0, 13.5)]),
+    Line(&[(5.0, 18.5), (19.0, 18.5)]),
+];
+
 impl Icon {
-    pub const ALL: [Icon; 24] = [
+    pub const ALL: [Icon; 32] = [
         Icon::Folder,
         Icon::FolderFill,
         Icon::File,
@@ -183,6 +251,14 @@ impl Icon {
         Icon::Plus,
         Icon::Minus,
         Icon::Trash,
+        Icon::Play,
+        Icon::Pause,
+        Icon::Volume,
+        Icon::Mute,
+        Icon::Expand,
+        Icon::Shrink,
+        Icon::Clock,
+        Icon::Eject,
     ];
 
     fn shapes(self) -> &'static [Shape] {
@@ -211,6 +287,14 @@ impl Icon {
             Icon::Plus => PLUS,
             Icon::Minus => MINUS,
             Icon::Trash => TRASH,
+            Icon::Play => PLAY,
+            Icon::Pause => PAUSE,
+            Icon::Volume => VOLUME,
+            Icon::Mute => MUTE,
+            Icon::Expand => EXPAND,
+            Icon::Shrink => SHRINK,
+            Icon::Clock => CLOCK,
+            Icon::Eject => EJECT,
         }
     }
 

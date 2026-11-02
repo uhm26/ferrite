@@ -1,16 +1,13 @@
-//! The gallery's frame, laid out the way frame apps are meant to look: a
-//! full-height navigation column, a page title, and groups of rows on flat panels
-//! in one centered column. Narrow windows fold the navigation to icons; the
-//! crossing glides (resize.md). Helpers here build the groups and rows.
+//! The gallery's frame, the app shell every frame app uses (`frame::ui::shell`): a
+//! folding, resizable sidebar of pages, a toolbar, a status line, and the page in the
+//! rounded pane as a title plus groups of rows on flat panels in one centered column.
+//! Helpers here build the groups and rows.
 
 use frame::ui::theme::*;
-use frame::ui::{Align, Icon, Rect, Ui};
+use frame::ui::{Align, Icon, Rect, SideItem, Sidebar, Ui};
 
-/// Navigation column, open and folded to icons.
-const NAV_W: f32 = 200.0;
-const NAV_NARROW_W: f32 = CONTROL_H + 2.0 * S8;
-/// Below this window width the navigation shows icons only.
-const NAV_NARROW_BELOW: f32 = 640.0;
+/// The sidebar folds to icons in windows narrower than this.
+const NARROW_BELOW: f32 = 640.0;
 /// The widest the column of groups gets.
 const CONTENT_MAX: f32 = 680.0;
 /// One row in a group: a control plus 8 above and below.
@@ -19,52 +16,53 @@ pub const ROW: f32 = CONTROL_H + 2.0 * S8;
 const TITLE_H: f32 = 32.0;
 /// Heading line above a group.
 const HEADING_H: f32 = 28.0;
+/// The sidebar footer: one line of small text.
+const FOOTER_H: f32 = 20.0;
 
-pub const PAGES: [(Icon, &str); 6] = [
-    (Icon::Check, "Controls"),
-    (Icon::List, "Lists"),
-    (Icon::Documents, "Type"),
-    (Icon::Image, "Color"),
-    (Icon::Grid, "Icons"),
-    (Icon::Forward, "Motion"),
+/// Icon, name and sidebar section of each page.
+pub const PAGES: [(Icon, &str, &str); 6] = [
+    (Icon::Check, "Controls", "Components"),
+    (Icon::List, "Lists", "Components"),
+    (Icon::Documents, "Type", "Look"),
+    (Icon::Image, "Color", "Look"),
+    (Icon::Grid, "Icons", "Look"),
+    (Icon::Forward, "Motion", "Look"),
 ];
 
-/// The navigation column; returns its width this frame (it glides).
-pub fn nav(ui: &mut Ui, page: &mut usize) -> f32 {
-    let (w, h) = ui.p.size();
-    let open = ui.spring("nav/open", f32::from(w >= NAV_NARROW_BELOW), GLIDE);
-    let nav_w = (NAV_NARROW_W + (NAV_W - NAV_NARROW_W) * open).round();
-    let side = ui.pal.sidebar;
-    ui.p.rect(Rect::new(0.0, 0.0, nav_w, h), 0.0, side);
-    ui.p.clip(Some(Rect::new(0.0, 0.0, nav_w, h)));
-    let item = |i: usize| {
-        Rect::new(
-            S8,
-            S16 + i as f32 * (CONTROL_H + 2.0),
-            nav_w - 2.0 * S8,
-            CONTROL_H,
-        )
-    };
-    let raise = ui.pal.raise;
-    ui.slide("nav/current", Some(item(*page)), raise);
-    for (i, (icon, name)) in PAGES.into_iter().enumerate() {
-        let r = item(i);
-        // Names go once the column is too narrow for them (cut at the edge, never squashed).
-        let label = if open > 0.5 { name } else { "" };
-        if ui.nav(&format!("nav/{i}"), r, (icon, label), *page == i) {
-            *page = i;
-        }
-    }
-    ui.p.clip(None);
-    nav_w
+/// A sidebar that folds below [`NARROW_BELOW`].
+pub fn sidebar() -> Sidebar {
+    let mut side = Sidebar::default();
+    side.content_min = NARROW_BELOW - side.width;
+    side
 }
 
-/// The page column right of the navigation: x and width, centered, at most
-/// `CONTENT_MAX` wide.
-pub fn column(win_w: f32, nav_w: f32) -> (f32, f32) {
-    let room = (win_w - nav_w - 2.0 * S24).max(0.0);
+/// The pages column; switches `page` on a click and returns its width this frame
+/// (it glides). The footer shows where the page is in the list.
+pub fn nav(ui: &mut Ui, side: &mut Sidebar, page: &mut usize) -> f32 {
+    let items = PAGES.map(|(icon, label, section)| SideItem {
+        icon,
+        label,
+        section,
+    });
+    let n = *page;
+    let mut footer = |ui: &mut Ui, r: Rect, a: f32| {
+        let small = ui.small();
+        let small = small.color(frame::ui::paint::mix(0, small.color, a));
+        let text = format!("Page {} of {}", n + 1, PAGES.len());
+        ui.text(r, &text, small, Align::Left);
+    };
+    let (w, clicked) = side.draw(ui, &items, Some(*page), Some((FOOTER_H, &mut footer)));
+    if let Some(i) = clicked {
+        *page = i;
+    }
+    w
+}
+
+/// The page column inside `pane`: x and width, centered, at most `CONTENT_MAX` wide.
+pub fn column(pane: Rect) -> (f32, f32) {
+    let room = (pane.w - 2.0 * S24).max(0.0);
     let w = room.min(CONTENT_MAX);
-    ((nav_w + S24 + (room - w) / 2.0).round(), w.round())
+    ((pane.x + S24 + (room - w) / 2.0).round(), w.round())
 }
 
 /// Lays a page out top to bottom: title, then groups.

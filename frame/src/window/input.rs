@@ -22,6 +22,8 @@ pub enum Pointer {
         discrete: i32,
         px: f64,
     },
+    /// Left the window (the last position is stale now).
+    Leave,
 }
 
 pub(super) struct Input {
@@ -151,6 +153,8 @@ impl<S: Default> Window<S> {
                 let (d, l, k, g) = (a.u32()?, a.u32()?, a.u32()?, a.u32()?);
                 if let Some(x) = &mut inp.xkb {
                     x.set_mods(d, l, k, g);
+                    let held = x.mods();
+                    self.events.push_back(Event::Mods(held));
                 }
             }
             keyboard::EV_REPEAT_INFO => {
@@ -188,6 +192,18 @@ impl<S: Default> Window<S> {
         self.conn.send(i.cursor_dev, cursor_shape::SET_SHAPE, &args)
     }
 
+    /// No cursor while over our window (a video playing), until the next `set_cursor`.
+    pub fn hide_cursor(&mut self) -> Result<(), Error> {
+        const HIDDEN: u32 = u32::MAX; // no real shape has this number
+        let i = &mut self.input;
+        if i.pointer == 0 || i.shape == HIDDEN {
+            return Ok(());
+        }
+        i.shape = HIDDEN;
+        let args = [Arg::U(i.enter_serial), Arg::U(0), Arg::I(0), Arg::I(0)];
+        self.conn.send(i.pointer, pointer::SET_CURSOR, &args)
+    }
+
     fn on_pointer(&mut self, ev: &WlEvent) -> Result<(), Error> {
         let mut a = ev.args();
         let inp = &mut self.input;
@@ -199,6 +215,7 @@ impl<S: Default> Window<S> {
                 let _surface = a.u32()?;
                 Some(Pointer::Motion(a.fixed()?, a.fixed()?))
             }
+            pointer::EV_LEAVE => Some(Pointer::Leave),
             pointer::EV_MOTION => {
                 let _time = a.u32()?;
                 Some(Pointer::Motion(a.fixed()?, a.fixed()?))

@@ -44,6 +44,7 @@ pub mod buffer {
 }
 
 pub mod surface {
+    pub const DESTROY: u16 = 0;
     pub const ATTACH: u16 = 1;
     pub const FRAME: u16 = 3;
     pub const SET_OPAQUE_REGION: u16 = 4;
@@ -76,6 +77,7 @@ pub mod keyboard {
 
 pub mod pointer {
     pub const EV_ENTER: u16 = 0;
+    pub const SET_CURSOR: u16 = 0;
     pub const EV_LEAVE: u16 = 1;
     pub const EV_MOTION: u16 = 2;
     pub const EV_BUTTON: u16 = 3;
@@ -94,22 +96,38 @@ pub mod data_device_manager {
 }
 
 pub mod data_device {
+    pub const START_DRAG: u16 = 0;
     pub const SET_SELECTION: u16 = 1;
     pub const EV_DATA_OFFER: u16 = 0;
+    pub const EV_ENTER: u16 = 1;
+    pub const EV_LEAVE: u16 = 2;
+    pub const EV_MOTION: u16 = 3;
+    pub const EV_DROP: u16 = 4;
     pub const EV_SELECTION: u16 = 5;
 }
 
 pub mod data_offer {
+    pub const ACCEPT: u16 = 0;
     pub const RECEIVE: u16 = 1;
     pub const DESTROY: u16 = 2;
+    pub const FINISH: u16 = 3; // since v3
+    pub const SET_ACTIONS: u16 = 4; // since v3
     pub const EV_OFFER: u16 = 0;
+    pub const EV_SOURCE_ACTIONS: u16 = 1;
+    pub const EV_ACTION: u16 = 2;
 }
 
 pub mod data_source {
     pub const OFFER: u16 = 0;
     pub const DESTROY: u16 = 1;
+    pub const SET_ACTIONS: u16 = 2; // since v3
     pub const EV_SEND: u16 = 1;
     pub const EV_CANCELLED: u16 = 2;
+    pub const EV_DND_FINISHED: u16 = 4;
+    pub const EV_ACTION: u16 = 5;
+    /// wl_data_device_manager.dnd_action bits.
+    pub const ACTION_COPY: u32 = 1;
+    pub const ACTION_MOVE: u32 = 2;
 }
 
 pub mod wm_base {
@@ -127,6 +145,10 @@ pub mod xdg_surface {
 pub mod toplevel {
     pub const SET_TITLE: u16 = 2;
     pub const SET_APP_ID: u16 = 3;
+    pub const SET_MAX_SIZE: u16 = 7;
+    pub const SET_MIN_SIZE: u16 = 8;
+    pub const SET_FULLSCREEN: u16 = 11;
+    pub const UNSET_FULLSCREEN: u16 = 12;
     pub const EV_CONFIGURE: u16 = 0;
     pub const EV_CLOSE: u16 = 1;
 }

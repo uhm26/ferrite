@@ -23,7 +23,7 @@ const MIMES: [&str; 4] = [
 pub(super) struct Clipboard {
     pub device: u32,
     /// Offers the compositor announced, with their mime types.
-    offers: Vec<(u32, Vec<String>)>,
+    pub offers: Vec<(u32, Vec<String>)>,
     /// The offer that is the current clipboard (0 = empty).
     selection: u32,
     /// Our own data source while we own the clipboard.
@@ -31,7 +31,8 @@ pub(super) struct Clipboard {
     /// Sources we replaced but the compositor hasn't confirmed gone: a late `send`
     /// for one still carries an fd that must be taken, or the fd queue desyncs.
     retired: Vec<u32>,
-    text: Arc<[u8]>,
+    /// What we offer while we own the clipboard: these bytes for each of `mimes`.
+    data: Arc<[u8]>,
 }
 
 impl Clipboard {
@@ -90,7 +91,13 @@ impl<S: Default> Window<S> {
 
     /// Put `text` on the clipboard.
     pub fn copy(&mut self, text: String) -> Result<(), Error> {
-        if self.clip.device == 0 || text.is_empty() {
+        self.copy_as(&MIMES, text.into_bytes())
+    }
+
+    /// Put `data` on the clipboard as each of `mimes` (an image: `["image/png"]` and
+    /// PNG bytes). Held only while the window lives (no clipboard manager here).
+    pub fn copy_as(&mut self, mimes: &[&str], data: Vec<u8>) -> Result<(), Error> {
+        if self.clip.device == 0 || data.is_empty() {
             return Ok(());
         }
         if self.clip.source != 0 {
@@ -104,14 +111,14 @@ impl<S: Default> Window<S> {
             data_device_manager::CREATE_DATA_SOURCE,
             &[Arg::U(id)],
         )?;
-        for m in MIMES {
+        for m in mimes {
             self.conn.send(id, data_source::OFFER, &[Arg::S(m)])?;
         }
         let args = [Arg::U(id), Arg::U(self.input.serial)];
         self.conn
             .send(self.clip.device, data_device::SET_SELECTION, &args)?;
         self.clip.source = id;
-        self.clip.text = text.into_bytes().into();
+        self.clip.data = data.into();
         self.conn.flush()
     }
 
@@ -124,12 +131,21 @@ impl<S: Default> Window<S> {
                 data_device::EV_SELECTION => {
                     c.selection = a.u32()?;
                     let sel = c.selection;
-                    for (id, _) in c.offers.iter().filter(|(id, _)| *id != sel) {
+                    let dragged = self.dnd.offer; // a drag in progress keeps its offer
+                    for (id, _) in c
+                        .offers
+                        .iter()
+                        .filter(|(id, _)| *id != sel && *id != dragged)
+                    {
                         self.conn.send(*id, data_offer::DESTROY, &[])?;
                     }
-                    self.clip.offers.retain(|(id, _)| *id == sel);
+                    self.clip
+                        .offers
+                        .retain(|(id, _)| *id == sel || *id == dragged);
                 }
-                _ => {} // drag and drop: not supported
+                _ => {
+                    self.on_dnd_device(ev)?;
+                }
             }
         } else if let Some((_, mimes)) = c.offers.iter_mut().find(|(id, _)| *id == ev.obj) {
             if ev.op == data_offer::EV_OFFER {
@@ -147,14 +163,14 @@ impl<S: Default> Window<S> {
         match ev.op {
             data_source::EV_SEND => {
                 let fd = self.conn.take_fd()?;
-                let text = Arc::clone(&self.clip.text);
+                let text = Arc::clone(&self.clip.data);
                 // A slow reader must not stall the app: write from a thread.
                 std::thread::spawn(move || send_all(fd, &text));
             }
             data_source::EV_CANCELLED => {
                 self.conn.send(ev.obj, data_source::DESTROY, &[])?;
                 self.clip.source = 0;
-                self.clip.text = Arc::from([]);
+                self.clip.data = Arc::from([]);
             }
             _ => {}
         }
@@ -164,7 +180,7 @@ impl<S: Default> Window<S> {
 
 /// Write `text` to a paste reader, giving up after 5 s without progress: a reader
 /// that stops reading must not keep this thread and the pipe alive forever.
-fn send_all(fd: OwnedFd, text: &[u8]) {
+pub(super) fn send_all(fd: OwnedFd, text: &[u8]) {
     if sys::set_nonblocking(fd.as_fd()).is_err() {
         return;
     }

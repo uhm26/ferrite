@@ -22,6 +22,8 @@ pub struct Input {
     pub pressed: bool,
     pub released: bool,
     pub keys: Vec<Key>,
+    /// Modifiers held now (the app copies them from `Event::Mods`): Ctrl/Shift+click.
+    pub mods: crate::xkb::Mods,
 }
 
 impl Input {
@@ -45,6 +47,8 @@ pub struct State {
     pub focus: Option<u64>,
     /// Last frame something hovered was clickable: show the hand cursor.
     pub pointer: bool,
+    /// Hold-to-fill progress per button (0-1; below 0: fired, waiting for release).
+    pub(crate) holds: HashMap<u64, f32>,
     /// Icon masks per (icon, px size).
     icons: HashMap<(Icon, u32), Box<[u8]>>,
     /// Last target of each `slide`, so it can fade out where it was.
@@ -81,6 +85,7 @@ impl State {
             focus: None,
             pointer: false,
             icons: HashMap::new(),
+            holds: HashMap::new(),
             slides: HashMap::new(),
             springs: HashMap::new(),
             frame: 0,
@@ -148,6 +153,11 @@ impl Ui<'_> {
         }
         self.s.moving |= sp.moving();
         sp.value
+    }
+
+    /// Seconds since the last frame (0 after idle).
+    pub fn dt(&self) -> f32 {
+        self.s.dt
     }
 
     /// Drop spring `name`: next use starts fresh.
@@ -374,5 +384,10 @@ mod tests {
             end = frame(&mut s, 100.0, 0.05);
         }
         assert!(lit(&end, 108) && !lit(&end, 8));
+        // A size change (the layout resizing) is followed at once, no lag.
+        let mut ui = s.begin(Canvas { px: &mut px, w: 120, h: 20 }, 0.05);
+        ui.slide("sel", Some(Rect::new(100.0, 0.0, 20.0, 16.0)), 0xffff_ffff);
+        ui.end();
+        assert!(lit(&px, 118), "the wider surface lagged");
     }
 }
