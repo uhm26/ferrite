@@ -9,7 +9,7 @@ built to stay out of your way.
 | [`files`](files) | File manager: tabs, split view, thumbnails, search, drives, undo | + cairo, librsvg, libwebp |
 | [`image`](image) | Image viewer: PNG, JPEG, GIF, WebP, SVG; zoom, pan, browse a folder | + cairo, librsvg, libwebp |
 | [`video`](video) | Video player on libmpv, GPU decode | + libmpv, EGL, gbm |
-| [`screenshot`](screenshot) | Full screen in ~25 ms, or freeze + pick a region or window | none |
+| [`screenshot`](screenshot) | Full screen in ~30 ms, or freeze + pick a region or window | none |
 | [`wallpaper`](wallpaper) | Wallpaper daemon: `wallpaper <image>` | none |
 | [`clipboard`](clipboard) | Keeps your last copy (text or image) alive after its app closes | none |
 

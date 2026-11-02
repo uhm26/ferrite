@@ -7,7 +7,8 @@
 ## Features
 
 - Full-screen capture of every output in one image, placed as they sit in your layout.
-  About 25 ms from start to saved file for two 1080p screens.
+  About 30 ms from start to saved file for two 1080p screens with the prebuilt binary;
+  about 25 ms when built for your own CPU (`RUSTFLAGS="-C target-cpu=native"`).
 - Capture a single output by name (`-o`).
 - Freeze mode (`-s`): the screen stops, the rest dims, and you drag a region or click a
   window or an output. What you select is what was on screen when you started.
