@@ -1,7 +1,9 @@
 [package]
 name = "pix"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 # PNG decoding: codec, not worth writing ourselves; zune shares zune-core with jpeg.
@@ -14,10 +16,12 @@ zune-core = { version = "0.5.3", default-features = false, features = ["std"] }
 gif = { version = "0.13.3", default-features = false, features = ["std"] }
 # WebP and SVG come from system libwebp + librsvg through our own bindings (src/sys/).
 
-[lints.clippy]
-too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
+[lints]
+workspace = true
 
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = true
+[features]
+# WebP and SVG link big system libraries (libwebp; librsvg pulls cairo, pango, glib: ~45 libs).
+# Tools that only need PNG/JPEG/GIF turn them off: `default-features = false`.
+default = ["webp", "svg"]
+webp = []
+svg = []

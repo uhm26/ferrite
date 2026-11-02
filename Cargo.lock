@@ -3,12 +3,36 @@
 version = 4
 
 [[package]]
+name = "clipboard"
+version = "0.1.0"
+
+[[package]]
+name = "files"
+version = "0.1.0"
+dependencies = [
+ "frame",
+ "pix",
+]
+
+[[package]]
+name = "frame"
+version = "0.1.0"
+
+[[package]]
 name = "gif"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ae047235e33e2829703574b54fdec96bfbad892062d97fed2f76022287de61b"
 dependencies = [
  "weezl",
+]
+
+[[package]]
+name = "image"
+version = "0.1.0"
+dependencies = [
+ "frame",
+ "pix",
 ]
 
 [[package]]
@@ -22,10 +46,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "screenshot"
+version = "0.1.0"
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
+name = "term"
+version = "0.1.0"
+
+[[package]]
+name = "video"
+version = "0.1.0"
+dependencies = [
+ "frame",
+]
+
+[[package]]
+name = "wallpaper"
+version = "0.1.0"
+dependencies = [
+ "pix",
+]
 
 [[package]]
 name = "weezl"

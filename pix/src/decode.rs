@@ -11,6 +11,7 @@ use zune_core::bytestream::ZCursor;
 use zune_core::colorspace::ColorSpace;
 use zune_core::options::DecoderOptions;
 
+#[cfg(feature = "svg")]
 use crate::svg::Svg;
 
 /// All frames of one animation together stay under this (RGB bytes; 16 GB machine).
@@ -50,6 +51,7 @@ pub struct Frame {
 /// What [`open`] found: pixels, or a vector document.
 pub enum Image {
     Frames(Vec<Frame>),
+    #[cfg(feature = "svg")]
     Svg(Svg),
 }
 
@@ -69,16 +71,27 @@ pub fn open(path: &Path, bg: [u8; 3]) -> Result<Image, Error> {
         jpeg(&bytes, bg).map(still)
     } else if bytes.starts_with(b"GIF8") {
         crate::gif::frames(&bytes, bg).map(Image::Frames)
-    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        crate::webp::frames(&bytes, bg).map(Image::Frames)
-    } else if is_svg(&bytes) {
-        Svg::new(&bytes).map(Image::Svg)
     } else {
-        Err(Error::Format)
+        open_optional(bytes, bg)
     }
 }
 
+/// Formats behind features (they link big system libraries). Off → `Error::Format`.
+fn open_optional(bytes: Vec<u8>, bg: [u8; 3]) -> Result<Image, Error> {
+    #[cfg(feature = "webp")]
+    if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        return crate::webp::frames(&bytes, bg).map(Image::Frames);
+    }
+    #[cfg(feature = "svg")]
+    if is_svg(&bytes) {
+        return Svg::new(&bytes).map(Image::Svg);
+    }
+    let _ = (bytes, bg); // used only by the optional formats
+    Err(Error::Format)
+}
+
 /// XML text with an `<svg` tag near the start (after any `<?xml`, comments, doctype).
+#[cfg(feature = "svg")]
 fn is_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(4096)];
     let text = head.strip_prefix(b"\xef\xbb\xbf").unwrap_or(head); // UTF-8 BOM
@@ -89,6 +102,7 @@ fn is_svg(bytes: &[u8]) -> bool {
 pub fn load(path: &Path, bg: [u8; 3]) -> Result<Rgb, Error> {
     match open(path, bg)? {
         Image::Frames(mut f) => Ok(f.swap_remove(0).img),
+        #[cfg(feature = "svg")]
         Image::Svg(s) => {
             let (w, h) = s.size();
             s.render((w.round() as usize, h.round() as usize), bg)
@@ -199,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "svg")]
     fn sniffs_svg_text() {
         assert!(is_svg(
             b"\xef\xbb\xbf<?xml version=\"1.0\"?>\n<!-- x -->\n<svg xmlns=\"\">"

@@ -1,0 +1,6 @@
+# Code shape limits for every crate in ferrite (functions ≤60 lines, ≤5 parameters).
+too-many-lines-threshold = 60
+too-many-arguments-threshold = 5
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

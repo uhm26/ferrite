@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = [
+    # libraries
+    "frame",
+    "pix",
+    # tools
+    "term",
+    "files",
+    "image",
+    "video",
+    "screenshot",
+    "wallpaper",
+    "clipboard",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/uhm26/ferrite"
+
+[workspace.lints.clippy]
+too_many_lines = "warn" # pedantic lint, off unless enabled; limit in clippy.toml
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

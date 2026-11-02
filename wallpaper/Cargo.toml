@@ -1,16 +1,13 @@
 [package]
 name = "wallpaper"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-# Our image library: PNG/JPEG decode + cover fit; snapshot, see vendor/pix.rev.
-pix = { path = "vendor/pix" }
+# Our image library: PNG/JPEG decode + cover fit (same repo).
+pix = { path = "../pix", default-features = false } # PNG/JPEG only: no WebP/SVG system libs
 
-[lints.clippy]
-too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = true
+[lints]
+workspace = true

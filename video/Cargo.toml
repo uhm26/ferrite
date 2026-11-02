@@ -1,17 +1,14 @@
 [package]
 name = "video"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 # Links system libs directly (own extern "C"): libmpv (decode, audio, A/V sync, scaling),
 # libEGL + libgbm (GL context and GPU buffers we hand to the compositor).
 [dependencies]
-frame = { path = "vendor/frame" } # our Wayland window + ui; snapshot, see vendor/frame.rev
+frame = { path = "../frame" } # our Wayland window + ui (same repo)
 
-[lints.clippy]
-too_many_lines = "warn"   # pedantic lint, off unless enabled; limit in clippy.toml
-
-[profile.release]
-lto = "thin"
-codegen-units = 1
-strip = true
+[lints]
+workspace = true

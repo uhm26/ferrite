@@ -17,7 +17,7 @@
 //! let bytes = pix::png(&img)?;              // PNG file bytes (clipboard)
 //! ```
 //! Codecs: zune (PNG, JPEG), the `gif` crate, system libwebp + librsvg through our own
-//! bindings in [`sys`] (docs/plans/formats/2026-11-02-gif-webp-svg.md).
+//! bindings in [`sys`].
 
 mod decode;
 mod encode;
@@ -25,8 +25,10 @@ mod gif;
 mod mip;
 mod orient;
 mod scale;
+#[cfg(feature = "svg")]
 mod svg;
 mod sys;
+#[cfg(feature = "webp")]
 mod webp;
 
 pub use decode::{Error, Frame, Image, Rgb, load, open};
@@ -34,4 +36,5 @@ pub use mip::Mip;
 pub use encode::png;
 pub use orient::{CCW, CW, orient};
 pub use scale::{cover, nearest, resample, transform};
+#[cfg(feature = "svg")]
 pub use svg::Svg;
