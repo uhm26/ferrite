@@ -52,29 +52,34 @@ pub fn list(path: &Path, hidden: bool) -> Result<Vec<Entry>, Error> {
             if !hidden && name.starts_with('.') {
                 return None;
             }
-            // fs::metadata follows symlinks, so a link to a folder opens like one.
-            let meta = fs::metadata(e.path()).ok();
-            let dir = meta.as_ref().is_some_and(fs::Metadata::is_dir);
-            let modified = meta
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs() as i64);
-            let size = meta.filter(|_| !dir).map_or(0, |m| m.len());
-            // One read_dir per subfolder, not recursive: what Nemo shows in Size.
-            let items = dir.then(|| count(&e.path(), hidden)).flatten();
-            Some(Entry {
-                name,
-                os,
-                dir,
-                size,
-                items,
-                modified,
-            })
+            Some(entry(&e.path(), (os, name), hidden))
         })
         .collect();
     sort(&mut out, SortBy::Name, false);
     Ok(out)
+}
+
+/// The entry for `path`, named `os` (for paths) and `name` (shown).
+pub fn entry(path: &Path, (os, name): (OsString, String), hidden: bool) -> Entry {
+    // fs::metadata follows symlinks, so a link to a folder opens like one.
+    let meta = fs::metadata(path).ok();
+    let dir = meta.as_ref().is_some_and(fs::Metadata::is_dir);
+    let modified = meta
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs() as i64);
+    let size = meta.filter(|_| !dir).map_or(0, |m| m.len());
+    // One read_dir per subfolder, not recursive: what Nemo shows in Size.
+    let items = dir.then(|| count(path, hidden)).flatten();
+    Entry {
+        name,
+        os,
+        dir,
+        size,
+        items,
+        modified,
+    }
 }
 
 /// Entries in folder `p`, dotfiles only when `hidden`.
@@ -238,6 +243,29 @@ pub fn date_of(secs: i64, now: Local) -> String {
     date(sys::local(secs), now)
 }
 
+/// A full date: "1 Nov 2026, 18:39".
+pub fn date_full(secs: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let t = sys::local(secs);
+    let mon = MONTHS[usize::from(t.month.min(11))];
+    format!("{} {mon} {}, {:02}:{:02}", t.day, t.year, t.hour, t.min)
+}
+
+/// Unix permission bits as `rwxr-xr-x`.
+pub fn mode_text(mode: u32) -> String {
+    (0..9)
+        .map(|i| {
+            if mode & (1 << (8 - i)) != 0 {
+                ["r", "w", "x"][i % 3]
+            } else {
+                "-"
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,6 +292,12 @@ mod tests {
         assert_eq!(date(at(2026, 10, 1, 9), now), "09:07");
         assert_eq!(date(at(2026, 9, 30, 9), now), "30 Oct");
         assert_eq!(date(at(2024, 0, 5, 9), now), "5 Jan 2024");
+    }
+
+    #[test]
+    fn modes_read_like_ls() {
+        assert_eq!(mode_text(0o755), "rwxr-xr-x");
+        assert_eq!(mode_text(0o640), "rw-r-----");
     }
 
     #[test]

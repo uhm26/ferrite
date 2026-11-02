@@ -1,12 +1,19 @@
 //! Where we are: the current folder, its entries, the selected one, back/forward
-//! history, and moving between folders. No drawing here.
+//! history, and moving between folders (tabs.rs: several at once; search.rs: names
+//! found in all subfolders; recent.rs: recent files). No drawing here.
 
+pub mod recent;
+pub mod search;
+pub mod tabs;
+
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Command;
 
 use crate::dir::{self, Entry, SortBy};
 use crate::sys;
+use search::Search;
 
 pub struct Browser {
     pub cwd: PathBuf,
@@ -23,17 +30,33 @@ pub struct Browser {
     pub error: Option<String>,
     /// Show dotfiles (Ctrl+H).
     pub hidden: bool,
+    /// Selected entries by name (survive sorting, filtering, reloads). Empty: the
+    /// cursor `sel` alone is selected.
+    pub marked: HashSet<OsString>,
+    /// Where a Shift range starts.
+    anchor: usize,
     /// Bumped on every successful load: views cache per-folder measurements by it.
     pub generation: u64,
     /// Column the entries are ordered by, and whether descending (folders first always).
     pub sort: (SortBy, bool),
     back: Vec<PathBuf>,
     forward: Vec<PathBuf>,
+    /// A search of all subfolders (Ctrl+Shift+F): its results replace the entries.
+    pub search: Option<Search>,
 }
 
 impl Browser {
     /// Open on `cwd`; if it can't be read, on home, then `/` (the error stays shown).
     pub fn new(cwd: PathBuf) -> Self {
+        Self::with(cwd, false, (SortBy::Name, false))
+    }
+
+    /// Open on `cwd` with `like`'s view settings (hidden files, sort): a new tab.
+    pub fn new_like(cwd: PathBuf, like: &Browser) -> Self {
+        Self::with(cwd, like.hidden, like.sort)
+    }
+
+    fn with(cwd: PathBuf, hidden: bool, sort: (SortBy, bool)) -> Self {
         let mut b = Browser {
             cwd: PathBuf::new(),
             entries: Vec::new(),
@@ -42,11 +65,14 @@ impl Browser {
             sel: 0,
             disk: None,
             error: None,
-            hidden: false,
+            hidden,
+            marked: HashSet::new(),
+            anchor: 0,
             generation: 0,
-            sort: (SortBy::Name, false),
+            sort,
             back: Vec::new(),
             forward: Vec::new(),
+            search: None,
         };
         if !b.load(cwd, None) {
             let why = b.error.take();
@@ -66,8 +92,10 @@ impl Browser {
                 dir::sort(&mut entries, self.sort.0, self.sort.1);
                 if path != self.cwd {
                     self.filter.clear();
+                    self.marked.clear();
                 }
                 self.disk = sys::disk(&path).ok();
+                self.search = None;
                 (self.cwd, self.all, self.error) = (path, entries, None);
                 self.show(select.map(OsStr::to_os_string));
                 self.generation += 1;
@@ -113,6 +141,60 @@ impl Browser {
         self.generation += 1;
     }
 
+    /// Search this folder and all below it for names containing `text` (any case);
+    /// the results replace the entries as they come in. Empty text ends a search.
+    pub fn search(&mut self, text: &str) {
+        if text.is_empty() {
+            self.end_search();
+            return;
+        }
+        self.search = Some(Search::start(self.cwd.clone(), text, self.hidden));
+        self.filter.clear();
+        self.marked.clear();
+        self.all.clear();
+        self.show(None);
+        self.generation += 1;
+    }
+
+    /// Show the recent files (the Recent place), newest first. Esc goes back.
+    pub fn show_recent(&mut self) {
+        self.search = Some(Search::recent());
+        self.filter.clear();
+        self.marked.clear();
+        self.all = recent::list(self.hidden);
+        self.show(None);
+        self.generation += 1;
+    }
+
+    /// Back from search results to the folder itself.
+    pub fn end_search(&mut self) {
+        if self.search.take().is_some() {
+            self.load(self.cwd.clone(), None);
+        }
+    }
+
+    /// Take in search results found meanwhile. True if anything changed.
+    pub fn search_tick(&mut self) -> bool {
+        let Some(s) = self.search.as_mut() else {
+            return false;
+        };
+        let was_done = s.done;
+        let found = s.take();
+        if found.is_empty() {
+            return s.done != was_done;
+        }
+        self.all.extend(found);
+        dir::sort(&mut self.all, self.sort.0, self.sort.1);
+        self.show(self.selected_name());
+        self.generation += 1;
+        true
+    }
+
+    /// A search is still walking.
+    pub fn searching(&self) -> bool {
+        self.search.as_ref().is_some_and(|s| !s.done)
+    }
+
     /// Read the folder again and select `name` (after a rename or new folder).
     pub fn reload_select(&mut self, name: &OsStr) {
         self.load(self.cwd.clone(), Some(name));
@@ -128,6 +210,15 @@ impl Browser {
     /// selected. If the folder itself is gone, step up to the nearest one left.
     pub fn reload(&mut self) {
         let keep = self.entries.get(self.sel).map(|e| e.os.clone());
+        if self.search.is_some() {
+            // Search results stay; only the ones gone from disk drop out.
+            let cwd = &self.cwd;
+            self.all
+                .retain(|e| cwd.join(&e.os).symlink_metadata().is_ok());
+            self.show(keep);
+            self.generation += 1;
+            return;
+        }
         if self.load(self.cwd.clone(), keep.as_deref()) {
             return;
         }
@@ -208,10 +299,95 @@ impl Browser {
         self.go(parent, from.as_deref());
     }
 
-    /// Move the selection by `d` rows, stopping at the ends.
+    /// Move the cursor by `d` rows, stopping at the ends; the selection becomes just it.
     pub fn step(&mut self, d: isize) {
         let last = self.entries.len().saturating_sub(1);
         self.sel = self.sel.saturating_add_signed(d).min(last);
+        self.marked.clear();
+        self.anchor = self.sel;
+    }
+
+    /// Move the cursor by `d` and select from the anchor to it (Shift+arrows).
+    pub fn extend(&mut self, d: isize) {
+        let last = self.entries.len().saturating_sub(1);
+        self.sel = self.sel.saturating_add_signed(d).min(last);
+        self.mark_range(self.anchor, self.sel);
+    }
+
+    /// A click on entry `i`: alone, Ctrl toggles it, Shift selects the range to it.
+    pub fn click(&mut self, i: usize, (ctrl, shift): (bool, bool)) {
+        if i >= self.entries.len() {
+            return;
+        }
+        if shift {
+            self.mark_range(self.anchor, i);
+        } else if ctrl {
+            if self.marked.is_empty()
+                && let Some(e) = self.entries.get(self.sel)
+            {
+                self.marked.insert(e.os.clone());
+            }
+            let name = &self.entries[i].os;
+            if !self.marked.remove(name) {
+                self.marked.insert(name.clone());
+            }
+            self.anchor = i;
+        } else {
+            self.marked.clear();
+            self.anchor = i;
+        }
+        self.sel = i;
+    }
+
+    fn mark_range(&mut self, a: usize, b: usize) {
+        let (lo, hi) = (a.min(b), a.max(b));
+        self.marked = self.entries[lo..=hi.min(self.entries.len().saturating_sub(1))]
+            .iter()
+            .map(|e| e.os.clone())
+            .collect();
+    }
+
+    /// Select exactly these entries (a box drawn around them), or add them.
+    pub fn mark(&mut self, which: &[usize], add: bool) {
+        if !add {
+            self.marked.clear();
+        }
+        self.marked.extend(
+            which
+                .iter()
+                .filter_map(|&i| self.entries.get(i))
+                .map(|e| e.os.clone()),
+        );
+    }
+
+    pub fn select_all(&mut self) {
+        self.marked = self.entries.iter().map(|e| e.os.clone()).collect();
+    }
+
+    /// Is entry `i` selected?
+    pub fn is_selected(&self, i: usize) -> bool {
+        if self.marked.is_empty() {
+            i == self.sel
+        } else {
+            self.entries
+                .get(i)
+                .is_some_and(|e| self.marked.contains(&e.os))
+        }
+    }
+
+    /// The selected entries, in list order (the cursor's alone when none are marked).
+    pub fn selection(&self) -> Vec<usize> {
+        (0..self.entries.len())
+            .filter(|&i| self.is_selected(i))
+            .collect()
+    }
+
+    /// Paths of the selected entries.
+    pub fn selected_paths(&self) -> Vec<PathBuf> {
+        self.selection()
+            .into_iter()
+            .map(|i| self.cwd.join(&self.entries[i].os))
+            .collect()
     }
 }
 
@@ -303,6 +479,29 @@ mod tests {
         let b = Browser::new(PathBuf::from("/no/such/folder"));
         assert!(!b.cwd.as_os_str().is_empty());
         assert!(b.error.is_some());
+    }
+
+    #[test]
+    fn ctrl_and_shift_clicks_select_like_nemo() {
+        let root = tree("multi", &["a", "b", "c", "d"]);
+        let mut b = Browser::new(root.clone());
+        b.click(1, (false, false));
+        b.click(3, (true, false));
+        let ctrl = b.selection();
+        b.click(0, (false, true));
+        let shift = b.selection();
+        b.step(1);
+        let plain = b.selection();
+        b.extend(2);
+        let ext = b.selection();
+        b.toggle_hidden();
+        let kept = b.selection();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(ctrl, [1, 3]);
+        assert_eq!(shift, [0, 1, 2, 3], "range from the anchor (3) to 0");
+        assert_eq!(plain, [1]);
+        assert_eq!(ext, [1, 2, 3]);
+        assert_eq!(kept, [1, 2, 3], "a reload keeps the selection by name");
     }
 
     #[test]

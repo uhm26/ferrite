@@ -14,8 +14,15 @@ use crate::browse::Browser;
 /// Chevron between crumbs.
 const SEP: f32 = 12.0;
 
-/// Draw the bar in `r`; true if the view switch changed `mode`.
-pub fn draw(ui: &mut Ui, b: &mut Browser, r: Rect, mode: &mut usize, loc: &mut Location) -> bool {
+/// Draw the bar in `r`, keeping `reserve` px free left of the view switch; true if
+/// the view switch changed `mode`.
+pub fn draw(
+    ui: &mut Ui,
+    b: &mut Browser,
+    (r, reserve): (Rect, f32),
+    mode: &mut usize,
+    loc: &mut Location,
+) -> bool {
     let nav = [
         (Icon::Back, b.can_back()),
         (Icon::Forward, b.can_forward()),
@@ -36,7 +43,8 @@ pub fn draw(ui: &mut Ui, b: &mut Browser, r: Rect, mode: &mut usize, loc: &mut L
     let seg_w = Ui::segment_w(2);
     let seg_x = r.x + r.w - seg_w;
     let changed = ui.segment("view", (seg_x, r.y), &[Icon::List, Icon::Grid], mode);
-    let room = Rect::new(x + S8, r.y, (seg_x - S12 - x - S8).max(0.0), r.h);
+    // `reserve`: room left free before the view switch (the Empty Trash button).
+    let room = Rect::new(x + S8, r.y, (seg_x - S12 - reserve - x - S8).max(0.0), r.h);
     if loc.open {
         loc.draw(ui, b, room);
         return changed;

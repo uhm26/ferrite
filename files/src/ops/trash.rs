@@ -92,15 +92,34 @@ fn restore_in(root: &Path, name: &str) -> io::Result<PathBuf> {
     Ok(to)
 }
 
+/// Names of everything in the trash.
+pub fn names() -> Vec<String> {
+    names_in(&root())
+}
+
+fn names_in(root: &Path) -> Vec<String> {
+    std::fs::read_dir(root.join("files"))
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Delete the trashed item `name` for good.
 pub fn erase(name: &str) -> io::Result<()> {
-    let p = files_dir().join(name);
+    erase_in(&root(), name)
+}
+
+fn erase_in(root: &Path, name: &str) -> io::Result<()> {
+    let p = root.join("files").join(name);
     if p.symlink_metadata()?.is_dir() {
         fs::remove_dir_all(&p)?;
     } else {
         fs::remove_file(&p)?;
     }
-    let _ = fs::remove_file(root().join("info").join(format!("{name}.trashinfo")));
+    let _ = fs::remove_file(root.join("info").join(format!("{name}.trashinfo")));
     Ok(())
 }
 
@@ -156,6 +175,25 @@ mod tests {
         assert!(!gone);
         assert_eq!((back, content.as_str()), (item, "x"));
         assert!(clash, "restoring over an existing file fails");
+    }
+
+    #[test]
+    fn emptying_removes_items_and_their_info() {
+        let base = std::env::temp_dir().join(format!("files-empty-{}", std::process::id()));
+        let (root, home) = (base.join("Trash"), base.join("home"));
+        fs::create_dir_all(home.join("dir/in")).unwrap();
+        fs::write(home.join("a"), "1").unwrap();
+        put_in(&root, &home.join("a")).unwrap();
+        put_in(&root, &home.join("dir")).unwrap();
+        for n in names_in(&root) {
+            erase_in(&root, &n).unwrap();
+        }
+        let left = (
+            fs::read_dir(root.join("files")).unwrap().count(),
+            fs::read_dir(root.join("info")).unwrap().count(),
+        );
+        fs::remove_dir_all(&base).unwrap();
+        assert_eq!(left, (0, 0));
     }
 
     #[test]

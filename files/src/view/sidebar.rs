@@ -1,15 +1,18 @@
-//! The places column, full height on its own surface: Home, the XDG folders that
-//! exist, the file system, and the free space at the bottom. Below a window width
-//! it folds to icons; the change glides.
+//! The places column (frame's `Sidebar`): Home, the XDG folders that exist, the
+//! Trash, bookmarks, the file system, and the free space at the bottom.
 
+use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use frame::ui::theme::*;
-use frame::ui::{Align, Icon, Rect, Ui};
+use frame::ui::paint::mix; // mix(0, c, a): c at opacity a (premultiplied, glass-safe)
+use frame::ui::theme::S4;
+use frame::ui::{Align, Icon, Rect, SideItem, Sidebar, Ui};
 
 use crate::browse::Browser;
-use crate::{bookmarks, dir, trash};
+use crate::drives::{Drive, Drives, Report};
+use crate::ops::trash;
+use crate::{bookmarks, dir};
 
 /// Folders under home Nemo lists, if they exist.
 /// shortcut: English names; read ~/.config/user-dirs.dirs for renamed/localized ones.
@@ -21,18 +24,8 @@ const XDG: [(&str, Icon); 6] = [
     ("Pictures", Icon::Image),
     ("Videos", Icon::Video),
 ];
-/// Column width, open and folded to icons.
-const OPEN_W: f32 = 208.0;
-/// How narrow and wide dragging may make it.
-const MIN_W: f32 = 160.0;
-const MAX_W: f32 = 400.0;
-/// Grab zone on each side of the edge, px.
-const EDGE: f32 = 4.0;
-const FOLDED_W: f32 = CONTROL_H + 2.0 * S8;
-/// Below this window width the column shows icons only.
-const FOLD_BELOW: f32 = 680.0;
-/// A heading line above a group of places.
-const HEADING_H: f32 = 28.0;
+/// The Recent place stands for no folder: this marks it.
+const RECENT: &str = "recent:///";
 /// Free-space note and meter at the bottom.
 const DISK_H: f32 = 40.0;
 
@@ -49,37 +42,38 @@ pub fn home() -> PathBuf {
 struct Place {
     name: String,
     icon: Icon,
+    /// Its folder (empty for a drive not mounted).
     path: PathBuf,
-    /// Index into `HEADINGS`: places, bookmarks or devices.
-    section: usize,
+    /// Its heading: places, bookmarks or devices.
+    section: &'static str,
+    /// The drive it is (Devices).
+    drive: Option<Drive>,
 }
-
-const HEADINGS: [&str; 3] = ["Places", "Bookmarks", "Devices"];
 
 pub struct Places {
     /// Places, then bookmarks, then devices.
     list: Vec<Place>,
-    /// Open width; the owner drags the edge to change it.
-    width: f32,
-    /// The edge is being dragged.
-    dragging: bool,
-    /// The pointer is on the edge (or dragging): show the resize cursor.
-    on_edge: bool,
+    /// The column: width, folding, edge drag (the view sets its `content_min`).
+    pub side: Sidebar,
+    /// Plugged-in drives (udisks2).
+    pub drives: Drives,
 }
 
+/// The eject button on a mounted drive's row.
+const EJECT: f32 = 24.0;
+
 impl Places {
-    pub fn new() -> Self {
+    pub fn new() -> io::Result<Self> {
         let mut p = Places {
             list: Vec::new(),
-            width: OPEN_W,
-            dragging: false,
-            on_edge: false,
+            side: Sidebar::default(),
+            drives: Drives::new()?,
         };
         p.refresh();
-        p
+        Ok(p)
     }
 
-    /// Look the places up again (a bookmark changed, the trash appeared).
+    /// Look the places up again (a bookmark changed, the trash appeared, a drive).
     pub fn refresh(&mut self) {
         let home = home();
         let place = |name: &str, icon, path, section| Place {
@@ -87,135 +81,135 @@ impl Places {
             icon,
             path,
             section,
+            drive: None,
         };
-        let mut list = vec![place("Home", Icon::Home, home.clone(), 0)];
+        let mut list = vec![
+            place("Recent", Icon::Clock, PathBuf::from(RECENT), "Places"),
+            place("Home", Icon::Home, home.clone(), "Places"),
+        ];
         for (name, icon) in XDG {
             let path = home.join(name);
             if path.is_dir() {
-                list.push(place(name, icon, path, 0));
+                list.push(place(name, icon, path, "Places"));
             }
         }
         let trash = trash::files_dir();
         if trash.is_dir() {
-            list.push(place("Trash", Icon::Trash, trash, 0));
+            list.push(place("Trash", Icon::Trash, trash, "Places"));
         }
         for (name, path) in bookmarks::load() {
-            list.push(place(&name, Icon::Folder, path, 1));
+            list.push(place(&name, Icon::Folder, path, "Bookmarks"));
         }
-        list.push(place("File System", Icon::Drive, PathBuf::from("/"), 2));
+        list.push(place("File System", Icon::Drive, "/".into(), "Devices"));
+        for d in &self.drives.list {
+            let path = d.mount.clone().unwrap_or_default();
+            list.push(Place {
+                drive: Some(d.clone()),
+                ..place(&d.name, Icon::Drive, path, "Devices")
+            });
+        }
         self.list = list;
     }
 
-    /// Entry rects for a column `w` wide, and a heading (y, text) above each section.
-    fn layout(&self, w: f32) -> (Vec<Rect>, Vec<(f32, &'static str)>) {
-        let mut heads = Vec::new();
-        let mut y = S16;
-        let mut section = usize::MAX;
-        let rects = self
-            .list
-            .iter()
-            .map(|p| {
-                if p.section != section {
-                    if section != usize::MAX {
-                        y += S12; // gap between groups ≥ 1.5× the gap inside one
-                    }
-                    section = p.section;
-                    heads.push((y, HEADINGS[section]));
-                    y += HEADING_H;
-                }
-                let r = Rect::new(S8, y, w - 2.0 * S8, CONTROL_H);
-                y += CONTROL_H + 2.0;
-                r
-            })
-            .collect();
-        (rects, heads)
-    }
-
-    /// The pointer is on the resize edge or dragging it.
-    pub fn resizing(&self) -> bool {
-        self.on_edge || self.dragging
-    }
-
-    /// Drag the right edge to set the width (no spring: it follows the hand).
-    fn drag(&mut self, ui: &mut Ui) {
-        let (_, h) = ui.p.size();
-        let edge = Rect::new(self.width - EDGE, 0.0, 2.0 * EDGE, h);
-        let input = &ui.s.input;
-        self.on_edge = edge.contains(input.pos);
-        if self.on_edge && input.pressed {
-            self.dragging = true;
-            ui.s.input.pressed = false; // the press is ours, not a row's
-        }
-        if !ui.s.input.down {
-            self.dragging = false;
-        }
-        if self.dragging {
-            self.width = ui.s.input.pos.0.clamp(MIN_W, MAX_W).round();
-        }
+    /// The place under `pos` (a drop target): its row and folder.
+    pub fn at(&self, pos: (f32, f32)) -> Option<(Rect, PathBuf)> {
+        let (i, r) = self.side.at(&items(&self.list), pos)?;
+        let path = &self.list[i].path;
+        let folder = path.as_os_str() != RECENT && !path.as_os_str().is_empty();
+        folder.then(|| (r, path.clone()))
     }
 
     /// Draw the column; returns its width this frame (it glides when folding).
     pub fn draw(&mut self, ui: &mut Ui, b: &mut Browser) -> f32 {
-        let (win_w, h) = ui.p.size();
-        let open = ui.spring("places/open", f32::from(win_w >= FOLD_BELOW), GLIDE);
-        if open > 0.5 {
-            self.drag(ui);
-        } else {
-            (self.dragging, self.on_edge) = (false, false);
-        }
-        let w = (FOLDED_W + (self.width - FOLDED_W) * open).round();
-        let side = ui.pal.sidebar;
-        let col = Rect::new(0.0, 0.0, w, h);
-        ui.p.rect(col, 0.0, side);
-        ui.p.clip(Some(col));
-        // Names go once the column is too narrow for them: cut at the edge, never squashed.
-        let named = open > 0.5;
-        let (rects, heads) = self.layout(w);
-        if named {
-            for (y, title) in heads {
-                let ink = ui.heading();
-                ui.text(
-                    Rect::new(S16, y, w - 2.0 * S16, HEADING_H),
-                    title,
-                    ink,
-                    Align::Left,
-                );
+        let items = items(&self.list);
+        let recent = b.search.as_ref().is_some_and(|s| s.recent);
+        let current = self.list.iter().position(|p| {
+            // Search results belong to no place; the recent files to Recent.
+            match p.path.as_os_str() == RECENT {
+                true => recent,
+                false => b.search.is_none() && p.path == b.cwd,
             }
-        }
-        // The current place's surface glides between entries (and fades off-list).
-        let current = self.list.iter().position(|p| p.path == b.cwd);
-        let raise = ui.pal.raise;
-        ui.slide("places/current", current.map(|i| rects[i]), raise);
-        let mut go = None;
-        for (i, (p, r)) in self.list.iter().zip(rects).enumerate() {
-            let label = if named { p.name.as_str() } else { "" };
-            if ui.nav(
-                &format!("place/{i}"),
-                r,
-                (p.icon, label),
-                current == Some(i),
-            ) {
-                go = Some(p.path.clone());
+        });
+        let disk_now = b.disk;
+        let mut footer = |ui: &mut Ui, r: Rect, a: f32| {
+            if let Some(d) = disk_now {
+                disk(ui, r, d, a);
             }
+        };
+        let footer = Some((DISK_H, &mut footer as &mut dyn FnMut(&mut Ui, Rect, f32)));
+        let (w, go) = self.side.draw(ui, &items, current, footer);
+        // After the rows: an eject press must win over its row's click.
+        let eject = self.eject_buttons(ui, &items);
+        let ejected = eject.is_some();
+        if let Some(d) = eject {
+            self.drives.eject(&d);
         }
-        if named && let Some(d) = b.disk {
-            disk(
-                ui,
-                Rect::new(S16, h - S16 - DISK_H, w - 2.0 * S16, DISK_H),
-                d,
-            );
-        }
-        ui.p.clip(None);
-        if let Some(p) = go {
-            b.go(p, None);
+        match go.filter(|_| !ejected).map(|i| &self.list[i]) {
+            Some(p) if p.path.as_os_str() == RECENT => b.show_recent(),
+            Some(Place {
+                drive: Some(d),
+                path,
+                ..
+            }) if path.as_os_str().is_empty() => self.drives.mount(d),
+            Some(p) => {
+                b.end_search();
+                b.go(p.path.clone(), None);
+            }
+            None => {}
         }
         w
     }
+
+    /// An eject button on each mounted drive's row while the column is open; the
+    /// drive whose button was pressed.
+    fn eject_buttons(&self, ui: &mut Ui, items: &[SideItem]) -> Option<Drive> {
+        let mut pressed = None;
+        for (i, p) in self.list.iter().enumerate() {
+            let (Some(d), Some(r)) = (&p.drive, self.side.rect(items, i)) else {
+                continue;
+            };
+            if d.mount.is_none() || r.w < 4.0 * EJECT {
+                continue;
+            }
+            let at = Rect::new(
+                r.x + r.w - EJECT - S4,
+                r.y + (r.h - EJECT) / 2.0,
+                EJECT,
+                EJECT,
+            );
+            if ui.icon_button(&format!("eject/{}", d.name), at, Icon::Eject, true) {
+                pressed = Some(d.clone());
+            }
+        }
+        pressed
+    }
+
+    /// Take in what the drives worker reported; what to tell the owner, if anything.
+    pub fn drive_reports(&mut self, b: &mut Browser) -> Option<String> {
+        let mut note = None;
+        for r in self.drives.reports() {
+            match r {
+                Report::List(_) => self.refresh(),
+                Report::Mounted(at) => {
+                    b.end_search();
+                    b.go(at, None);
+                }
+                Report::Ejected(name) => {
+                    note = Some(format!("\u{201c}{name}\u{201d} can be unplugged now"))
+                }
+                Report::Unmounted(name) => note = Some(format!("Unmounted \u{201c}{name}\u{201d}")),
+                Report::Failed(e) => note = Some(failed(&e)),
+            }
+        }
+        note
+    }
 }
 
-/// "349 GB free … 378 GB" over a meter of how full the disk is (absolute, ui skill §5).
-fn disk(ui: &mut Ui, r: Rect, (free, total): (u64, u64)) {
+/// "349 GB free … 378 GB" over a meter of how full the disk is (absolute, ui skill §5),
+/// at opacity `a` (it fades as the column folds).
+fn disk(ui: &mut Ui, r: Rect, (free, total): (u64, u64), a: f32) {
     let small = ui.small();
+    let small = small.color(mix(0, small.color, a));
     let line = Rect { h: 20.0, ..r };
     ui.text(
         line,
@@ -225,45 +219,34 @@ fn disk(ui: &mut Ui, r: Rect, (free, total): (u64, u64)) {
     );
     ui.text(line, &dir::human(total), small, Align::Right);
     let used = 1.0 - free as f32 / total.max(1) as f32;
-    ui.meter(Rect::new(r.x, r.y + 28.0, r.w, S4), used);
+    // ui.meter's look, faded.
+    let bar = Rect::new(r.x, r.y + 28.0, r.w, S4).round();
+    let fill = Rect {
+        w: (bar.w * used.clamp(0.0, 1.0)).round().max(bar.h),
+        ..bar
+    };
+    let (raise, sub) = (ui.pal.raise, ui.pal.sub);
+    ui.p.rect(bar, bar.h / 2.0, mix(0, raise, a));
+    ui.p.rect(fill, bar.h / 2.0, mix(0, sub, a));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use frame::ui::{State, Text, theme::FAMILY};
-    use frame::window::Canvas;
+/// The sidebar entries for `list`.
+fn items(list: &[Place]) -> Vec<SideItem<'_>> {
+    list.iter()
+        .map(|p| SideItem {
+            icon: p.icon,
+            label: &p.name,
+            section: p.section,
+        })
+        .collect()
+}
 
-    /// Press on the edge, move, release: the width follows the pointer, clamped.
-    #[test]
-    fn dragging_the_edge_resizes() {
-        let mut s = State::new(Text::new(FAMILY).unwrap());
-        let mut p = Places::new();
-        let mut px = vec![0u32; 900 * 300];
-        let mut frame = |s: &mut State, p: &mut Places, pos: (f32, f32), down: Option<bool>| {
-            s.input.pos = pos;
-            if let Some(d) = down {
-                s.input.button(d);
-            }
-            let mut ui = s.begin(
-                Canvas {
-                    px: &mut px,
-                    w: 900,
-                    h: 300,
-                },
-                0.05,
-            );
-            p.drag(&mut ui);
-            ui.end();
-        };
-        frame(&mut s, &mut p, (OPEN_W + 1.0, 100.0), Some(true));
-        assert!(p.resizing());
-        frame(&mut s, &mut p, (300.0, 100.0), None);
-        assert_eq!(p.width, 300.0);
-        frame(&mut s, &mut p, (900.0, 100.0), None);
-        assert_eq!(p.width, MAX_W, "clamped");
-        frame(&mut s, &mut p, (900.0, 100.0), Some(false));
-        frame(&mut s, &mut p, (100.0, 100.0), None);
-        assert_eq!(p.width, MAX_W, "released: no longer follows");
+/// A failed mount or eject, in words: udisks wants a password for internal disks and
+/// we have no polkit agent to ask for it.
+fn failed(e: &str) -> String {
+    if e.contains("NotAuthorized") {
+        "Error: not allowed to mount this disk without a password (needs a polkit rule)".into()
+    } else {
+        format!("Error: {e}")
     }
 }

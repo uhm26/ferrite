@@ -1,5 +1,6 @@
-//! `file://` URIs and percent-encoding, as GTK bookmarks and the FreeDesktop trash
-//! (`Path=` in .trashinfo) write paths. Bytes, not chars: paths need not be UTF-8.
+//! `file://` URIs and percent-encoding, as GTK bookmarks, the FreeDesktop trash
+//! (`Path=` in .trashinfo) and drag and drop (`text/uri-list`) write paths. Bytes,
+//! not chars: paths need not be UTF-8.
 
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -57,6 +58,20 @@ pub fn to_file_uri(p: &Path) -> String {
     format!("file://{}", encode(p))
 }
 
+/// A `text/uri-list` (drag and drop): one `file://` URI per line, CRLF ended.
+pub fn list(paths: &[PathBuf]) -> String {
+    paths.iter().map(|p| to_file_uri(p) + "\r\n").collect()
+}
+
+/// The local files in a `text/uri-list` (comments and other schemes left out).
+pub fn parse_list(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(from_file_uri)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +84,9 @@ mod tests {
         assert_eq!(from_file_uri(&uri), Some(odd));
         assert_eq!(from_file_uri("sftp://x"), None);
         assert_eq!(decode("50%"), PathBuf::from("50%"));
+        let two = [PathBuf::from("/a b"), PathBuf::from("/c")];
+        assert_eq!(list(&two), "file:///a%20b\r\nfile:///c\r\n");
+        let got = parse_list("# comment\r\nfile:///a%20b\r\nhttps://x.org\nfile:///c");
+        assert_eq!(got, two);
     }
 }
