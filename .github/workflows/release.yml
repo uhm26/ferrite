@@ -36,7 +36,9 @@ jobs:
               target=x86_64-unknown-linux-musl; short=x86_64-linux-musl; runner=ubuntu-22.04; apt="" ;;
             # System libraries: glibc build on the oldest runner, so it runs on newer distros too.
             term) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame" ;;
-            files|image) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame $pix" ;;
+            image) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame $pix" ;;
+            # files also runs bsdtar (archives); its tests use it.
+            files) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-22.04; apt="$frame $pix libarchive-tools" ;;
             # libmpv.so.2 (mpv >= 0.35) first ships in 24.04; 22.04 has libmpv.so.1.
             video) target=x86_64-unknown-linux-gnu; short=x86_64-linux-gnu; runner=ubuntu-24.04; apt="$frame libmpv-dev libegl-dev libgbm-dev" ;;
             *) echo "no release build for '$tool'" >&2; exit 1 ;;

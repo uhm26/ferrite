@@ -119,6 +119,7 @@ install_one() {
     say "installed $tool ${tag#"$tool"-v} to $dir/$tool"
     install_menu_entry "$tool" "$tmp/$asset"
     check_libs "$dir/$tool"
+    check_programs "$tool"
     notes_for "$tool"
 }
 
@@ -164,6 +165,37 @@ pkg_for() {
         debian) echo "$d" ;;
         fedora) echo "$f" ;;
         *) echo "$1" ;;
+    esac
+}
+
+# Programs tool $1 runs for some features: tell the user if they are missing.
+check_programs() {
+    case "$1" in
+        term) cmds="xdg-open" ;;
+        files) cmds="xdg-open bsdtar" ;;
+        *) return 0 ;;
+    esac
+    family=$(distro_family)
+    miss=""
+    pkgs=""
+    for c in $cmds; do
+        has "$c" && continue
+        miss="$miss $c"
+        case "$c:$family" in
+            xdg-open:*) p=xdg-utils ;;
+            bsdtar:arch) p=libarchive ;;
+            bsdtar:debian) p=libarchive-tools ;;
+            *) p=$c ;;
+        esac
+        pkgs="$pkgs $p"
+    done
+    [ -n "$miss" ] || return 0
+    say "missing programs:$miss (opening files with their app / archives need them)"
+    case "$family" in
+        arch) say "install them with: sudo pacman -S --needed$pkgs" ;;
+        debian) say "install them with: sudo apt install$pkgs" ;;
+        fedora) say "install them with: sudo dnf install$pkgs" ;;
+        *) say "install:$pkgs" ;;
     esac
 }
 
