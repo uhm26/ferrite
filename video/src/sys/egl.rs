@@ -91,7 +91,7 @@ pub struct Gl {
     pub bind_framebuffer: unsafe extern "C" fn(c_uint, c_uint),
     pub framebuffer_texture_2d: unsafe extern "C" fn(c_uint, c_uint, c_uint, c_uint, c_int),
     pub check_framebuffer_status: unsafe extern "C" fn(c_uint) -> c_uint,
-    pub finish: unsafe extern "C" fn(),
+    pub flush: unsafe extern "C" fn(),
 }
 
 /// Look up `name` (NUL-terminated) as a function pointer of type `F`.
@@ -122,7 +122,7 @@ impl Gl {
                 bind_framebuffer: load(b"glBindFramebuffer\0")?,
                 framebuffer_texture_2d: load(b"glFramebufferTexture2D\0")?,
                 check_framebuffer_status: load(b"glCheckFramebufferStatus\0")?,
-                finish: load(b"glFinish\0")?,
+                flush: load(b"glFlush\0")?,
             })
         }
     }

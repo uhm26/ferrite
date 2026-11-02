@@ -1,4 +1,4 @@
-//! vid — our own Wayland video player. libmpv is the engine ([`player`]): it
+//! video — our own Wayland video player. libmpv is the engine ([`player`]): it
 //! decodes on the GPU and draws each frame into a GPU buffer we own ([`gpu`]),
 //! which goes to the compositor as is, on a subsurface under the window
 //! ([`video`]). frame draws the [`controls`] on the window above it. [`app`] runs

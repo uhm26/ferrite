@@ -1,5 +1,5 @@
 //! Headless look check: the controls over a gray stand-in frame, written to a PNG,
-//! no compositor or mpv needed. `vid --png OUT [--size WxH] [--pointer X,Y]`
+//! no compositor or mpv needed. `video --png OUT [--size WxH] [--pointer X,Y]`
 //! (a pointer over the seek track shows its hover and time pill).
 
 use std::time::Instant;

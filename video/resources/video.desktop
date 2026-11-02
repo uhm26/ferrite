@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
-Name=vid
+Name=video
 GenericName=Video Player
 Comment=Play videos (libmpv engine, GPU decode)
-Exec=vid %f
-Icon=vid
+Exec=video %f
+Icon=video
 Terminal=false
 NoDisplay=false
 Categories=AudioVideo;Video;Player;
 MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/ogg;
 Keywords=video;movie;player;mp4;mkv;webm;
-StartupWMClass=vid
+StartupWMClass=video

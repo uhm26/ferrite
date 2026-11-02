@@ -68,7 +68,7 @@ impl Gpu {
         }
         // SAFETY: GBM platform with our live gbm device; no attributes.
         let dpy = unsafe {
-            egl::eglGetPlatformDisplay(egl::EGL_PLATFORM_GBM_KHR, gbm::native(dev), null_mut())
+            egl::eglGetPlatformDisplay(egl::EGL_PLATFORM_GBM_KHR, dev.cast(), null_mut())
         };
         // SAFETY: `dpy` from above; null version out-pointers are allowed.
         if dpy.is_null() || unsafe { egl::eglInitialize(dpy, null_mut(), null_mut()) } == 0 {
@@ -92,26 +92,19 @@ impl Gpu {
         self.node.as_raw_fd()
     }
 
-    /// Wait until the GPU finished drawing, so the compositor reads a whole frame.
-    /// shortcut: glFinish stalls this thread ~1 ms per frame; an explicit-sync fence
-    /// (linux-drm-syncobj) would not, if this ever shows up in a profile.
-    pub fn finish(&self) {
+    /// Send the queued GL work to the GPU without waiting for it.
+    /// shortcut: relies on amdgpu implicit sync (the compositor's import waits on the
+    /// dmabuf's fence), not checked live yet; if Hyprland ever shows half-drawn
+    /// frames, use explicit sync (linux-drm-syncobj) — glFinish was the old stopgap.
+    pub fn flush(&self) {
         // SAFETY: our context is current on this thread.
-        unsafe { (self.gl.finish)() };
+        unsafe { (self.gl.flush)() };
     }
 
-    /// A `w` × `h` XRGB buffer mpv can draw into (`fbo`) and Wayland can show.
-    pub fn target(&self, w: u32, h: u32) -> Result<Target, Error> {
-        // SAFETY: live device; XRGB8888 for rendering is supported by every mesa driver.
-        let bo = unsafe {
-            gbm::gbm_bo_create(
-                self.dev,
-                w,
-                h,
-                gbm::GBM_FORMAT_XRGB8888,
-                gbm::GBM_BO_USE_RENDERING,
-            )
-        };
+    /// A `w` × `h` XRGB buffer mpv can draw into (`fbo`) and Wayland can show, laid
+    /// out with one of `modifiers` (the compositor's list; empty: gbm picks).
+    pub fn target(&self, w: u32, h: u32, modifiers: &[u64]) -> Result<Target, Error> {
+        let bo = self.bo(w, h, modifiers);
         if bo.is_null() {
             return Err(Error::Gbm("gbm_bo_create"));
         }
@@ -133,6 +126,23 @@ impl Gpu {
         t.image = self.import(&t)?;
         self.attach(&mut t)?;
         Ok(t)
+    }
+
+    /// A gbm buffer with a modifier from `modifiers`, else one gbm picks (also if
+    /// gbm can't use any of them).
+    fn bo(&self, w: u32, h: u32, modifiers: &[u64]) -> *mut gbm::gbm_bo {
+        let (fmt, usage) = (gbm::GBM_FORMAT_XRGB8888, gbm::GBM_BO_USE_RENDERING);
+        if !modifiers.is_empty() {
+            let (p, n) = (modifiers.as_ptr(), modifiers.len() as u32);
+            // SAFETY: live device; `p` points at `n` modifiers that outlive the call.
+            let bo =
+                unsafe { gbm::gbm_bo_create_with_modifiers2(self.dev, w, h, fmt, p, n, usage) };
+            if !bo.is_null() {
+                return bo;
+            }
+        }
+        // SAFETY: live device; XRGB8888 for rendering is supported by every mesa driver.
+        unsafe { gbm::gbm_bo_create(self.dev, w, h, fmt, usage) }
     }
 
     fn import(&self, t: &Target) -> Result<EGLImage, Error> {

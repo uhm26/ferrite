@@ -1,4 +1,4 @@
-<!-- vid icon: same tile as image.svg (dark surface, 1 px hairline), light play
+<!-- video icon: same tile as image.svg (dark surface, 1 px hairline), light play
      triangle. Monochrome per the ui skill. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <rect x="4.5" y="6.5" width="55" height="51" rx="11" fill="#151515" stroke="#2a2a2a"/>

@@ -26,7 +26,7 @@ const HIDE_AFTER: Duration = Duration::from_millis(2000);
 const DOUBLE_CLICK: Duration = Duration::from_millis(300);
 const MAX_DT: f32 = 0.05;
 const USAGE: &str =
-    "usage: vid FILE  (headless look check: vid --png OUT [--size WxH] [--pointer X,Y])";
+    "usage: video FILE  (headless look check: video --png OUT [--size WxH] [--pointer X,Y])";
 
 /// What a window buffer holds outside the bar zone, so the next draw into it
 /// knows whether the whole buffer must be painted again.
@@ -50,12 +50,13 @@ struct App {
     awake_until: Instant,
     visible: bool,
     last_draw: Instant,
-    last_click: Option<Instant>,
+    /// The last click on the picture, and whether a double-click undoes its toggle.
+    last_click: Option<(Instant, bool)>,
     frame_due: bool,
     titled: String,
     quit: bool,
     /// What the bar showed at the last state change (see `look_key`).
-    drawn_key: [i64; 7],
+    drawn_key: [i64; 8],
 }
 
 pub fn run() -> Res<()> {
@@ -67,12 +68,12 @@ pub fn run() -> Res<()> {
         return Err(USAGE.into());
     };
     let gpu = Gpu::open()?;
-    let mut win: Window<Painted> = Window::new("vid", "vid", false)?;
+    let mut win: Window<Painted> = Window::new("video", "video", false)?;
     let (w, h) = win.configured_size();
     win.set_size(if w == 0 { 1280 } else { w }, if h == 0 { 720 } else { h });
     let mut video = Video::new(&mut win)?;
     let (vw, vh) = (win.width as u32, win.height as u32);
-    video.resize(&mut win, vw, vh)?;
+    video.resize(vw, vh);
     let player = Player::new(file, &gpu)?;
     let now = Instant::now();
     let mut app = App {
@@ -89,8 +90,9 @@ pub fn run() -> Res<()> {
         frame_due: false,
         titled: String::new(),
         quit: false,
-        drawn_key: [0; 7],
+        drawn_key: [0; 8],
     };
+    app.ui.input.pos = (-1.0, -1.0); // outside until the pointer enters
     app.run()
 }
 
@@ -155,7 +157,7 @@ impl App {
         };
         let was_shown = self.video.shown;
         self.player.render(self.video.target(i))?;
-        self.gpu.finish();
+        self.gpu.flush();
         self.video.present(&mut self.win, i)?;
         if !was_shown {
             self.win.flush()?; // the window turns see-through on its next draw
@@ -192,7 +194,7 @@ impl App {
             Event::Close => self.quit = true,
             Event::Resize(w, h) if w > 0 && h > 0 => {
                 self.win.set_size(w, h);
-                self.video.resize(&mut self.win, w as u32, h as u32)?;
+                self.video.resize(w as u32, h as u32);
                 self.frame_due = true; // redraw the paused frame at the new size
             }
             Event::Key(k) => {
@@ -200,21 +202,32 @@ impl App {
                 self.wake();
             }
             Event::Mods(m) => self.ui.input.mods = m,
-            Event::Pointer(p) => self.pointer(p)?,
+            Event::Pointer(p) => return self.pointer(p),
             _ => return Ok(false),
         }
         Ok(true)
     }
 
-    fn pointer(&mut self, p: Pointer) -> Res<()> {
+    /// One pointer event. True if the bar must redraw: motion over the picture
+    /// changes nothing there (showing a hidden bar is `update_visible`'s job).
+    fn pointer(&mut self, p: Pointer) -> Res<bool> {
+        let zone = controls::zone_top(self.win.height) as f32;
         match p {
             Pointer::Motion(x, y) => {
+                let was = self.ui.input.pos.1;
                 self.ui.input.pos = (x as f32, y as f32);
                 self.wake();
+                // Entering (was outside) needs a draw too: it sets the cursor.
+                let near = |y: f32| y < 0.0 || y >= zone;
+                return Ok(near(was) || near(y as f32) || self.ui.input.down);
             }
+            Pointer::Leave => self.ui.input.pos = (-1.0, -1.0), // the bar may hide now
             Pointer::Button { button, pressed } if button == pointer::BTN_LEFT => {
                 self.ui.input.button(pressed);
-                if pressed && !self.controls.bar.contains(self.ui.input.pos) {
+                let on_bar = self.controls.bar.contains(self.ui.input.pos);
+                if pressed && on_bar {
+                    self.last_click = None; // a bar click breaks a double-click
+                } else if pressed {
                     self.click_video()?;
                 }
             }
@@ -224,43 +237,51 @@ impl App {
                 } else {
                     px / f64::from(WHEEL_STEP)
                 };
-                let v = self.player.state.volume - 5.0 * clicks; // wheel down = quieter
-                self.act(Action::Volume(v))?;
+                self.act(Action::Louder(-5.0 * clicks))?; // wheel down = quieter
                 self.wake();
             }
-            _ => {}
+            _ => return Ok(false),
         }
-        Ok(())
+        Ok(true)
     }
 
     /// A click on the picture pauses; a second one soon after goes fullscreen
-    /// (and the two pauses cancel out).
+    /// (and the two pauses cancel out; a replay from the end stays).
     fn click_video(&mut self) -> Res<()> {
         let now = Instant::now();
-        let double = self.last_click.is_some_and(|t| now - t < DOUBLE_CLICK);
-        self.last_click = (!double).then_some(now);
-        self.act(Action::Toggle)?;
-        if double {
-            self.act(Action::Fullscreen)?;
+        match self.last_click.take() {
+            Some((t, undo)) if now - t < DOUBLE_CLICK => {
+                if undo {
+                    self.act(Action::Toggle)?;
+                }
+                self.act(Action::Fullscreen)
+            }
+            _ => {
+                self.last_click = Some((now, !self.player.state.ended));
+                self.act(Action::Toggle)
+            }
         }
-        Ok(())
     }
 
     /// Keys (keysyms, xkbcommon-keysyms.h).
     fn key(&mut self, k: &Key) -> Res<()> {
-        let s = &self.player.state;
-        let (t, v) = (s.time, s.volume);
-        let act = match k.sym {
-            0x20 | 0x6b => Action::Toggle,                       // Space, k
-            0xff51 => Action::Seek(t - 5.0, false),              // Left
-            0xff53 => Action::Seek(t + 5.0, false),              // Right
-            0x6a => Action::Seek(t - 10.0, false),               // j
-            0x6c => Action::Seek(t + 10.0, false),               // l
-            0xff50 => Action::Seek(0.0, true),                   // Home
-            0xff52 => Action::Volume(v + 5.0),                   // Up
-            0xff54 => Action::Volume(v - 5.0),                   // Down
-            0x6d => Action::Mute,                                // m
-            0x66 => Action::Fullscreen,                          // f
+        let sym = match k.sym {
+            0x41..=0x5a => k.sym + 0x20, // A-Z: Caps Lock or Shift, same key
+            s => s,
+        };
+        let act = match sym {
+            // Holding a key repeats only seeking and volume (not pause, mute, fullscreen).
+            _ if k.repeat && !matches!(sym, 0xff51..=0xff54 | 0x6a | 0x6c) => return Ok(()),
+            0x20 | 0x6b => Action::Toggle,     // Space, k
+            0xff51 => Action::Skip(-5.0),      // Left
+            0xff53 => Action::Skip(5.0),       // Right
+            0x6a => Action::Skip(-10.0),       // j
+            0x6c => Action::Skip(10.0),        // l
+            0xff50 => Action::Seek(0.0, true), // Home
+            0xff52 => Action::Louder(5.0),     // Up
+            0xff54 => Action::Louder(-5.0),    // Down
+            0x6d => Action::Mute,              // m
+            0x66 => Action::Fullscreen,        // f
             0xff1b if self.win.fullscreen => Action::Fullscreen, // Escape leaves it
             0xff1b | 0x71 => {
                 self.quit = true; // Escape, q
@@ -276,7 +297,7 @@ impl App {
         let done = match a {
             Action::Toggle if p.state.ended => p
                 .command(&["seek", "0", "absolute"])
-                .and(p.set_flag("pause", false)),
+                .and(p.command(&["set", "pause", "no"])),
             Action::Toggle => p.command(&["cycle", "pause"]),
             Action::Seek(t, exact) => {
                 let t = t.clamp(0.0, p.state.duration.max(0.0)).to_string();
@@ -290,7 +311,11 @@ impl App {
                     },
                 ])
             }
+            // Relative: mpv lands on a keyframe in that direction, and presses made
+            // before it reports the new time add up (absolute+keyframes can land behind).
+            Action::Skip(d) => p.command(&["seek", &d.to_string(), "relative"]),
             Action::Volume(v) => p.set_double("volume", v.clamp(0.0, 100.0)),
+            Action::Louder(d) => p.command(&["add", "volume", &d.to_string()]),
             Action::Mute => p.command(&["cycle", "mute"]),
             Action::Fullscreen => {
                 let on = !self.win.fullscreen;
@@ -298,7 +323,7 @@ impl App {
             }
         };
         if let Err(e) = done {
-            eprintln!("vid: {e}"); // e.g. seeking before the file loaded: not fatal
+            eprintln!("video: {e}"); // e.g. seeking before the file loaded: not fatal
         }
         Ok(())
     }
@@ -363,9 +388,9 @@ impl App {
 
     /// Everything the bar shows, at the precision it shows it: the clock in whole
     /// seconds, the seek fill in window px. Hidden, it shows nothing.
-    fn look_key(&self) -> [i64; 7] {
+    fn look_key(&self) -> [i64; 8] {
         if !self.visible {
-            return [0; 7];
+            return [0; 8];
         }
         let s = &self.player.state;
         let fill = if s.duration > 0.0 {
@@ -381,13 +406,14 @@ impl App {
             i64::from(s.paused),
             i64::from(s.muted),
             i64::from(s.ended),
+            i64::from(self.player.failed.is_some()), // the "can't play" screen
         ]
     }
 
     fn retitle(&mut self) -> Res<()> {
         let t = &self.player.state.title;
         if *t != self.titled {
-            self.win.set_title(if t.is_empty() { "vid" } else { t })?;
+            self.win.set_title(if t.is_empty() { "video" } else { t })?;
             self.titled = t.clone();
         }
         Ok(())

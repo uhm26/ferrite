@@ -1,7 +1,7 @@
 //! Raw libgbm: GPU buffers we render into and hand to the compositor as dmabufs.
 //! Signatures from /usr/include/gbm.h (mesa 26.2).
 
-use std::ffi::{c_int, c_void};
+use std::ffi::{c_int, c_uint};
 
 #[repr(C)]
 pub struct gbm_device {
@@ -28,17 +28,22 @@ unsafe extern "C" {
         format: u32,
         flags: u32,
     ) -> *mut gbm_bo;
+    /// gbm.h:372 (mesa 26.2): like gbm_bo_create, with the modifiers it may pick from.
+    pub fn gbm_bo_create_with_modifiers2(
+        gbm: *mut gbm_device,
+        width: u32,
+        height: u32,
+        format: u32,
+        modifiers: *const u64,
+        count: c_uint,
+        flags: u32,
+    ) -> *mut gbm_bo;
     pub fn gbm_bo_get_plane_count(bo: *mut gbm_bo) -> c_int;
     pub fn gbm_bo_get_fd_for_plane(bo: *mut gbm_bo, plane: c_int) -> c_int;
     pub fn gbm_bo_get_stride_for_plane(bo: *mut gbm_bo, plane: c_int) -> u32;
     pub fn gbm_bo_get_offset(bo: *mut gbm_bo, plane: c_int) -> u32;
     pub fn gbm_bo_get_modifier(bo: *mut gbm_bo) -> u64;
     pub fn gbm_bo_destroy(bo: *mut gbm_bo);
-}
-
-/// Lets `*mut gbm_device` pass where EGL wants a native display.
-pub fn native(dev: *mut gbm_device) -> *mut c_void {
-    dev.cast()
 }
 
 #[cfg(test)]

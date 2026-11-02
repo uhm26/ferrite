@@ -55,7 +55,7 @@ pub struct State {
 }
 
 /// Options set before init. config=no: libmpv's default; the owner's mpv.conf is
-/// for the mpv app, vid has its own look and keys.
+/// for the mpv app, video has its own look and keys.
 const OPTIONS: &[(&str, &str)] = &[
     ("vo", "libmpv"),
     ("hwdec", "auto-safe"),
@@ -67,7 +67,9 @@ const OPTIONS: &[(&str, &str)] = &[
     ("osc", "no"),
     ("input-default-bindings", "no"),
     ("terminal", "no"),
-    ("audio-client-name", "vid"),
+    ("audio-client-name", "video"),
+    // The bar's 0-100; `add volume` stops there too.
+    ("volume-max", "100"),
     // Deliver each frame at its display time instead of early + a blocking wait in
     // render (up to 50 ms on our UI thread otherwise; render.h BLOCK_FOR_TARGET_TIME).
     ("video-timing-offset", "0"),
@@ -165,15 +167,6 @@ impl Player {
         check("command", unsafe { mpv_command(self.h, ptrs.as_mut_ptr()) })
     }
 
-    pub fn set_flag(&mut self, name: &str, on: bool) -> Result<(), Error> {
-        let mut v: c_int = on.into();
-        let name = CString::new(name).expect("literal");
-        // SAFETY: live handle; FLAG reads one int from `v`.
-        check("set_property", unsafe {
-            mpv_set_property(self.h, name.as_ptr(), MPV_FORMAT_FLAG, (&raw mut v).cast())
-        })
-    }
-
     pub fn set_double(&mut self, name: &str, v: f64) -> Result<(), Error> {
         let mut v = v;
         let name = CString::new(name).expect("literal");
@@ -192,12 +185,12 @@ impl Player {
         self.wake_r.as_fd()
     }
 
-    /// Empty the wake pipe and apply every queued mpv event. True if the state the
-    /// controls show changed.
+    /// Empty the wake pipe and apply every queued mpv event. True if what the
+    /// window shows changed (the state, or the file failed).
     pub fn poll(&mut self) -> bool {
         let mut sink = [0u8; 64];
         while matches!((&self.wake_r).read(&mut sink), Ok(n) if n > 0) {}
-        let before = self.state.clone();
+        let mut changed = false;
         loop {
             // SAFETY: live handle; timeout 0 never blocks. The event stays valid
             // until the next wait_event call.
@@ -205,56 +198,63 @@ impl Player {
             match ev.event_id {
                 MPV_EVENT_NONE => break,
                 MPV_EVENT_SHUTDOWN => self.quit = true,
-                MPV_EVENT_PROPERTY_CHANGE => self.property(ev),
-                MPV_EVENT_END_FILE => self.end_file(ev),
+                MPV_EVENT_PROPERTY_CHANGE => changed |= self.property(ev),
+                MPV_EVENT_END_FILE => changed |= self.end_file(ev),
                 _ => {}
             }
         }
-        self.state != before
+        changed
     }
 
-    fn property(&mut self, ev: &mpv_event) {
+    /// Apply one property change. True if the value is new.
+    fn property(&mut self, ev: &mpv_event) -> bool {
         // SAFETY: PROPERTY_CHANGE carries an mpv_event_property.
         let p = unsafe { &*(ev.data as *const mpv_event_property) };
         let Some((_, format)) = WATCH.get(ev.reply_userdata as usize) else {
-            return;
+            return false;
         };
         if p.data.is_null() || p.format != *format {
-            return; // unavailable for now (no file yet): keep the last value
+            return false; // unavailable for now (no file yet): keep the last value
         }
         let s = &mut self.state;
         // SAFETY: the data pointer has the type of the format we asked for.
         unsafe {
             match ev.reply_userdata {
-                0 => s.time = *(p.data as *const f64),
-                1 => s.duration = *(p.data as *const f64),
-                2 => s.paused = *(p.data as *const c_int) != 0,
-                3 => s.volume = *(p.data as *const f64),
-                4 => s.muted = *(p.data as *const c_int) != 0,
+                0 => put(&mut s.time, *(p.data as *const f64)),
+                1 => put(&mut s.duration, *(p.data as *const f64)),
+                2 => put(&mut s.paused, *(p.data as *const c_int) != 0),
+                3 => put(&mut s.volume, *(p.data as *const f64)),
+                4 => put(&mut s.muted, *(p.data as *const c_int) != 0),
                 5 => {
                     let c = *(p.data as *const *const c_char);
-                    s.title = CStr::from_ptr(c).to_string_lossy().into_owned();
+                    put(
+                        &mut s.title,
+                        CStr::from_ptr(c).to_string_lossy().into_owned(),
+                    )
                 }
-                6 => s.ended = *(p.data as *const c_int) != 0,
+                6 => put(&mut s.ended, *(p.data as *const c_int) != 0),
                 7 => {
                     let c = *(p.data as *const *const c_char);
-                    eprintln!("vid: decoder: {}", CStr::from_ptr(c).to_string_lossy());
+                    eprintln!("video: decoder: {}", CStr::from_ptr(c).to_string_lossy());
+                    false
                 }
-                _ => {}
+                _ => false,
             }
         }
     }
 
-    fn end_file(&mut self, ev: &mpv_event) {
+    /// True if the file failed.
+    fn end_file(&mut self, ev: &mpv_event) -> bool {
         // SAFETY: END_FILE carries an mpv_event_end_file.
         let e = unsafe { &*(ev.data as *const mpv_event_end_file) };
         if e.reason == MPV_END_FILE_REASON_ERROR {
             // SAFETY: mpv returns a static string for every error code.
             let why = unsafe { CStr::from_ptr(mpv_error_string(e.error)) };
             let why = why.to_string_lossy().into_owned();
-            eprintln!("vid: can't play: {why}");
+            eprintln!("video: can't play: {why}");
             self.failed = Some(why);
         }
+        e.reason == MPV_END_FILE_REASON_ERROR
     }
 
     /// mpv has a new frame for us to draw.
@@ -290,6 +290,13 @@ impl Player {
         // SAFETY: live render context.
         unsafe { mpv_render_context_report_swap(self.render) };
     }
+}
+
+/// Store `v`; true if it differs from what was there.
+fn put<T: PartialEq>(slot: &mut T, v: T) -> bool {
+    let new = *slot != v;
+    *slot = v;
+    new
 }
 
 fn param(kind: c_int, data: *mut c_void) -> mpv_render_param {

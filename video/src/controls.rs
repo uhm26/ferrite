@@ -23,10 +23,15 @@ pub const VIDEO_BG: u32 = 0xff00_0000;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
     Toggle,
-    /// Seek to seconds; exact (slow, on release) or to a keyframe (fast, dragging).
+    /// Seek to seconds: exact (a click, the end of a drag) or to the keyframe
+    /// before it (fast: each step of a drag).
     Seek(f64, bool),
+    /// Seek by seconds, to a keyframe in that direction (fast, like mpv's arrows).
+    Skip(f64),
     /// 0-100.
     Volume(f64),
+    /// Volume up (+) or down (-) by this much.
+    Louder(f64),
     Mute,
     Fullscreen,
 }
@@ -51,6 +56,8 @@ pub struct Controls {
     pub bar: Rect,
     /// Last position sent while dragging, so a still pointer sends nothing.
     sent: Option<f64>,
+    /// The seek grab moved since the press (its last seek was to a keyframe).
+    moved: bool,
 }
 
 struct Layout {
@@ -183,6 +190,9 @@ impl Controls {
     fn seek(&mut self, ui: &mut Ui, l: &Layout, st: &State, out: &mut Vec<Action>) -> f64 {
         let hit = Rect::new(l.seek.x - S4, l.bar.y, l.seek.w + S8, l.bar.h);
         let can = st.duration > 0.0;
+        if !can && self.grab == Some(Grab::Seek) {
+            self.grab = None; // the file went away mid-drag
+        }
         let grabbed = if can {
             self.drag(ui, Grab::Seek, hit, l.seek)
         } else {
@@ -190,20 +200,27 @@ impl Controls {
         };
         let released = ui.s.input.released || !ui.s.input.down;
         if let Some(at) = grabbed {
+            // The press seeks exactly right away (a click needs nothing more), drag
+            // steps go to keyframes, and the release lands exactly if it moved.
             let t = at * st.duration;
+            let first = self.sent.is_none();
             if released {
                 self.grab = None;
-                out.push(Action::Seek(t, true));
+                if first || self.moved {
+                    out.push(Action::Seek(t, true));
+                }
+                self.moved = false;
             } else if self.sent != Some(t) {
+                self.moved |= !first;
                 self.sent = Some(t);
-                out.push(Action::Seek(t, false));
+                out.push(Action::Seek(t, first));
             }
         }
         let played = grabbed.unwrap_or(if can { st.time / st.duration } else { 0.0 });
         let over = can && ui.over(hit);
         ui.s.pointer |= over;
         let hot = over || grabbed.is_some();
-        track(ui, "seek", l.seek, (played as f32, hot), ui.pal.text);
+        track(ui, "seek/grow", l.seek, (played as f32, hot), ui.pal.text);
         if over || grabbed.is_some() {
             let spot = grabbed
                 .unwrap_or(f64::from((ui.s.input.pos.0 - l.seek.x) / l.seek.w).clamp(0.0, 1.0));
@@ -234,14 +251,20 @@ impl Controls {
         let over = ui.over(hit);
         ui.s.pointer |= over;
         let fill = if st.muted { ui.pal.dim } else { ui.pal.text };
-        track(ui, "volume", r, (level, over || grabbed.is_some()), fill);
+        track(
+            ui,
+            "volume/grow",
+            r,
+            (level, over || grabbed.is_some()),
+            fill,
+        );
     }
 }
 
 /// A thin capsule across the middle of `r`, `frac` of it filled, a knob on the
 /// fill's end while `hot`.
 fn track(ui: &mut Ui, name: &str, r: Rect, (frac, hot): (f32, bool), fill: u32) {
-    let grow = ui.spring(&format!("{name}/grow"), f32::from(hot), SNAP);
+    let grow = ui.spring(name, f32::from(hot), SNAP);
     let th = TRACK + 2.0 * grow;
     let cy = r.y + r.h / 2.0;
     let line = Rect::new(r.x, cy - th / 2.0, r.w, th);
@@ -365,6 +388,56 @@ mod tests {
             assert!(l.play.x >= l.bar.x && l.full.x + l.full.w <= l.bar.x + l.bar.w);
             assert!(l.seek.w > 0.0, "no room to seek at {w}");
         }
+    }
+
+    #[test]
+    fn a_click_seeks_exactly_once_and_a_drag_lands_exactly() {
+        let mut ui = frame::ui::State::new(frame::ui::Text::new(frame::ui::theme::FAMILY).unwrap());
+        let state = State {
+            duration: 100.0,
+            ..State::default()
+        };
+        let look = Look {
+            state: &state,
+            visible: true,
+            fullscreen: false,
+        };
+        let (w, h) = (1280, 720);
+        let mut px = vec![0u32; w * h];
+        let mut c = Controls::default();
+        let mut frame = |ui: &mut frame::ui::State, c: &mut Controls| {
+            let mut f = ui.begin(frame::window::Canvas { px: &mut px, w, h }, 0.0);
+            let acts = c.draw(&mut f, &look);
+            f.end();
+            acts
+        };
+        let y = h as f32 - MARGIN - BAR_H / 2.0; // the middle of the bar: on the seek track
+        ui.input.pos = (640.0, y);
+        frame(&mut ui, &mut c);
+        // Press and release: one exact seek, at the press.
+        ui.input.button(true);
+        assert!(matches!(
+            frame(&mut ui, &mut c)[..],
+            [Action::Seek(_, true)]
+        ));
+        ui.input.button(false);
+        assert!(frame(&mut ui, &mut c).is_empty());
+        // Both in one frame: still one exact seek.
+        ui.input.button(true);
+        ui.input.button(false);
+        assert!(matches!(
+            frame(&mut ui, &mut c)[..],
+            [Action::Seek(_, true)]
+        ));
+        // Drag: exact press, keyframe steps, exact landing where it let go.
+        ui.input.button(true);
+        frame(&mut ui, &mut c);
+        ui.input.pos.0 = 700.0;
+        let [Action::Seek(t, false)] = frame(&mut ui, &mut c)[..] else {
+            panic!("a drag step seeks to a keyframe");
+        };
+        ui.input.button(false);
+        assert_eq!(frame(&mut ui, &mut c), [Action::Seek(t, true)]);
     }
 
     #[test]
