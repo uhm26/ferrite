@@ -15,7 +15,7 @@ jobs:
     # Oldest supported runner: binaries built against its glibc run on newer distros too.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Read the tag
         id: tag
