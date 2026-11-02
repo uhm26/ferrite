@@ -1,10 +1,10 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match clip::daemon::run() {
+    match clipboard::daemon::run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("clip: {e}");
+            eprintln!("clipboard: {e}");
             ExitCode::FAILURE
         }
     }

@@ -22,7 +22,7 @@ pub const TEXT: [&str; 5] = [
 /// The image type nearly every app pastes; preferred over any other image type.
 const PNG: &str = "image/png";
 /// Our own sources carry this, so we can tell them apart from real copies.
-const MARKER: &str = "application/x-clip-keeper";
+const MARKER: &str = "application/x-clipboard-keeper";
 /// Password managers mark secrets with this (KeePassXC, KDE); never keep those.
 const SECRET: &str = "x-kde-passwordManagerHint";
 /// Pastes served at once; past this the oldest (likely stuck) one is dropped.
@@ -182,15 +182,15 @@ impl Keeper {
             let (mime, reader) = self.readers.swap_remove(i);
             match step {
                 Ok(true) => self.keep(&mime, reader),
-                Ok(false) => eprintln!("clip: gave up on {mime}: no data for {STALL:?}"),
-                Err(e) => eprintln!("clip: reading {mime} failed: {e}"),
+                Ok(false) => eprintln!("clipboard: gave up on {mime}: no data for {STALL:?}"),
+                Err(e) => eprintln!("clipboard: reading {mime} failed: {e}"),
             }
         }
         self.writers.retain_mut(|w| match w.step() {
             Ok(done) => !done,
             Err(e) => {
                 if e.kind() != io::ErrorKind::BrokenPipe {
-                    eprintln!("clip: a paste failed: {e}"); // the app closing early is normal
+                    eprintln!("clipboard: a paste failed: {e}"); // the app closing early is normal
                 }
                 false
             }
@@ -265,7 +265,7 @@ impl Keeper {
         }
         match Writer::new(fd, data) {
             Ok(w) => self.writers.push(w),
-            Err(e) => eprintln!("clip: serving a paste failed: {e}"),
+            Err(e) => eprintln!("clipboard: serving a paste failed: {e}"),
         }
     }
 }

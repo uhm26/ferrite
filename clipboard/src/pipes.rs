@@ -38,7 +38,7 @@ impl Reader {
         sys::set_nonblocking(pipe.as_fd())?; // our own pipe, nobody else shares it
         let _ = splice::grow_pipe(pipe.as_fd()); // only a speedup; 64 KiB works too
         let kept = Kept {
-            fd: splice::memfd(c"clip")?,
+            fd: splice::memfd(c"clipboard")?,
             len: 0,
         };
         let last = Instant::now();
