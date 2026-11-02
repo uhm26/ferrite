@@ -4,7 +4,7 @@
 //! clipboard; it speaks Wayland through [`wl`]. [`font`] loads FreeType faces with
 //! fontconfig fallback. [`ui`] is the look and the widgets on top. [`sys`] holds the
 //! raw libc calls (poll, memfd, inotify). [`png`] writes headless screenshots.
-//! Merged from term (most complete copy); see docs/plans/core.
+//! Merged from term (most complete copy).
 
 pub mod font;
 pub mod png;

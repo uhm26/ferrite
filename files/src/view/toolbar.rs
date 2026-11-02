@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn crumbs_start_at_home_or_root() {
         let labels = |cwd: &str| -> Vec<String> {
-            trail(Path::new(cwd), Path::new("/home/gabe"))
+            trail(Path::new(cwd), Path::new("/home/user"))
                 .into_iter()
                 .map(|c| {
                     if c.0 == Some(Icon::Home) {
@@ -170,12 +170,12 @@ mod tests {
                 .collect()
         };
         assert_eq!(
-            labels("/home/gabe/projects/files"),
+            labels("/home/user/projects/files"),
             ["~", "projects", "files"]
         );
-        assert_eq!(labels("/home/gabe"), ["~"]);
+        assert_eq!(labels("/home/user"), ["~"]);
         assert_eq!(labels("/usr/lib"), ["/", "usr", "lib"]);
-        assert_eq!(labels("/home/gabe2"), ["/", "home", "gabe2"]);
+        assert_eq!(labels("/home/user2"), ["/", "home", "user2"]);
         assert_eq!(labels("/"), ["/"]);
     }
 }

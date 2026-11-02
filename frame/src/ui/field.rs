@@ -319,7 +319,7 @@ mod tests {
         };
         let mut s = State::new(Text::new(FAMILY).unwrap());
         let mut px = vec![0u32; 300 * 40];
-        let mut value = String::from("/home/gabe");
+        let mut value = String::from("/home/user");
         let r = Rect::new(0.0, 0.0, 300.0, 32.0);
         let mut frame = |s: &mut State, keys: Vec<Key>, open: bool, value: &mut String| -> bool {
             s.input.keys = keys;

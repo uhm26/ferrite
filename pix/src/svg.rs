@@ -1,5 +1,5 @@
 //! SVG through the system librsvg (text via pango, 0 crates; resvg was 1.8× faster but
-//! 55 crates: docs/plans/formats/2026-11-02-gif-webp-svg.md). Vector: render at any size.
+//! 55 crates). Vector: render at any size.
 
 use std::ffi::CStr;
 

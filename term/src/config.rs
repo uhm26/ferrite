@@ -1,7 +1,6 @@
 //! Settings from `~/.config/term/config` (`key = value`; lines starting with `#` are
 //! comments). Every key is optional; bad lines are reported and skipped, never
-//! fatal. The default theme follows the hypr rice
-//! (../hypr/docs/plans/look/2026-11-01-rice-vision.md): near-black, gray text,
+//! fatal. The default theme is monochrome: near-black, gray text,
 //! one warm sand accent, 1 px hairlines, low-chroma colors.
 
 use std::fmt;

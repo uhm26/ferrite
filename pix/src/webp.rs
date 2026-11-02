@@ -1,5 +1,5 @@
 //! WebP (still, animated, lossy, lossless) through the system libwebp: 2× faster than the
-//! pure-Rust decoder on our files (docs/plans/formats/2026-11-02-gif-webp-svg.md).
+//! pure-Rust decoder on our files.
 //! libwebp's animation decoder hands back whole composited canvases, stills included.
 
 use std::ffi::c_int;
