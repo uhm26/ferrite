@@ -229,7 +229,7 @@ notes_for() {
     case "$1" in
         clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = clipboard; sway: exec clipboard)" ;;
         wallpaper) say "wallpaper: run wallpaper IMAGE once; start a bare wallpaper with your session to restore it" ;;
-        screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to ~/Pictures" ;;
+        screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to your Pictures folder" ;;
     esac
 }
 

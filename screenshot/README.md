@@ -54,7 +54,7 @@ screenshot [-o OUTPUT | -s] [FILE | -]
 
 | Argument | Meaning |
 |---|---|
-| (none) | Capture all outputs into a new file in `~/Pictures` |
+| (none) | Capture all outputs into a new file in your Pictures folder |
 | `-o OUTPUT` | Capture only the output with this name (as the compositor names it, e.g. `DP-1`) |
 | `-s` | Freeze the screen and pick a region, window or output |
 | `FILE` | Write to this file instead (an existing file is overwritten) |
@@ -103,11 +103,12 @@ window list, so any click saves the output under the pointer.
 
 | Path | Use |
 |---|---|
-| `~/Pictures/screenshot-YYYY-MM-DD_HH-MM-SS.png` | Default output (local time). The folder is created if missing. A second shot in the same second gets `-2`, `-3`, … and never overwrites. |
+| `<Pictures>/screenshot-YYYY-MM-DD_HH-MM-SS.png` | Default output (local time). The folder is created if missing. A second shot in the same second gets `-2`, `-3`, … and never overwrites. |
 | `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` | The Wayland socket (`wayland-0` if `WAYLAND_DISPLAY` is unset) |
 | `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock` | Hyprland IPC, read in freeze mode for window positions (500 ms timeout; without it, window pick is off) |
 
-The default folder is always `$HOME/Pictures`; `XDG_PICTURES_DIR` is not read.
+The folder is `XDG_PICTURES_DIR` (from the environment, else `~/.config/user-dirs.dirs`),
+else `~/Pictures`.
 
 ## Requirements
 
