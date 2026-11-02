@@ -1,0 +1,70 @@
+# Release one tool: push a tag `<tool>-v<version>` (e.g. clipboard-v0.1.0). This tests it,
+# builds it, and publishes `<tool>-<target>.tar.gz` + `.sha256` as a GitHub release that
+# install.sh downloads.
+name: release
+
+on:
+  push:
+    tags: ["*-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Oldest supported runner: binaries built against its glibc run on newer distros too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the tag
+        id: tag
+        run: |
+          tag="$GITHUB_REF_NAME"
+          tool="${tag%-v*}"
+          version="${tag##*-v}"
+          # Tools without system libraries ship fully static (musl): they run on any Linux.
+          case "$tool" in
+            clipboard|screenshot|wallpaper) target=x86_64-unknown-linux-musl; short=x86_64-linux-musl ;;
+            *) echo "no release build for '$tool' yet" >&2; exit 1 ;;
+          esac
+          grep -q "^version = \"$version\"$" "$tool/Cargo.toml" \
+            || { echo "$tool/Cargo.toml is not at version $version" >&2; exit 1; }
+          {
+            echo "tool=$tool"
+            echo "version=$version"
+            echo "target=$target"
+            echo "asset=$tool-$short"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target "${{ steps.tag.outputs.target }}"
+          rustup default stable
+
+      - name: Test
+        run: cargo test -q --release -p "${{ steps.tag.outputs.tool }}" --target "${{ steps.tag.outputs.target }}"
+
+      - name: Build
+        run: cargo build --release -p "${{ steps.tag.outputs.tool }}" --target "${{ steps.tag.outputs.target }}"
+
+      - name: Package
+        run: |
+          tool="${{ steps.tag.outputs.tool }}"
+          asset="${{ steps.tag.outputs.asset }}"
+          mkdir -p "dist/$asset"
+          cp "target/${{ steps.tag.outputs.target }}/release/$tool" "$tool/README.md" \
+             LICENSE-MIT LICENSE-APACHE "dist/$asset/"
+          tar -C dist -czf "dist/$asset.tar.gz" "$asset"
+          (cd dist && sha256sum "$asset.tar.gz" > "$asset.tar.gz.sha256")
+          ls -l dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/${{ steps.tag.outputs.asset }}.tar.gz" \
+            "dist/${{ steps.tag.outputs.asset }}.tar.gz.sha256" \
+            --title "${{ steps.tag.outputs.tool }} ${{ steps.tag.outputs.version }}" \
+            --notes "Install: \`curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- ${{ steps.tag.outputs.tool }}\`"

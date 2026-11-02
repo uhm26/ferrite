@@ -25,7 +25,14 @@ Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 
 ## Install
 
-A one-line installer is coming. Until then, build from source.
+Prebuilt binaries for x86_64 Linux, checked with SHA-256, installed to `~/.local/bin` (no root):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- clipboard
+```
+
+Prebuilt so far: `clipboard`. The other tools: build from source (below). Run it again to
+update; `--uninstall` removes a tool, `--help` lists the options.
 
 ## Build from source
 
