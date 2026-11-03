@@ -1,7 +1,22 @@
-# ferrite
+<div align="center">
 
-Small, fast desktop tools for Wayland, written in Rust. Few dependencies, monochrome look,
-built to stay out of your way.
+<img src="assets/banner.svg" alt="ferrite: small, fast desktop tools for Wayland, written in Rust" width="100%">
+
+<br>
+
+[![Arch Linux](https://img.shields.io/badge/platform-Arch%20Linux-242424?style=flat-square&labelColor=111111)](#requirements)
+[![Wayland](https://img.shields.io/badge/display-Wayland-242424?style=flat-square&labelColor=111111)](#requirements)
+[![Rust](https://img.shields.io/badge/written%20in-Rust-242424?style=flat-square&labelColor=111111)](#build-from-source)
+[![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-242424?style=flat-square&labelColor=111111)](#license)
+
+Few dependencies, monochrome look, built to stay out of your way.
+
+<img src="assets/files.png" alt="files, the file manager" width="49%">
+<img src="assets/image.png" alt="image, the image viewer" width="49%">
+
+</div>
+
+## Tools
 
 | Tool | What it does | System libraries |
 |---|---|---|
@@ -9,12 +24,27 @@ built to stay out of your way.
 | [`files`](files) | File manager: tabs, split view, thumbnails, search, drives, undo | + cairo, librsvg, libwebp |
 | [`image`](image) | Image viewer: PNG, JPEG, GIF, WebP, SVG; zoom, pan, browse a folder | + cairo, librsvg, libwebp |
 | [`video`](video) | Video player on libmpv, GPU decode | + libmpv, EGL, gbm |
-| [`screenshot`](screenshot) | Full screen in ~30 ms, or freeze + pick a region or window | none |
+| [`screenshot`](screenshot) | Full screen in ~20 ms, or freeze + pick a region or window | none |
 | [`wallpaper`](wallpaper) | Wallpaper daemon: `wallpaper <image>` | none |
 | [`clipboard`](clipboard) | Keeps your last copy (text or image) alive after its app closes | none |
 
 Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 [`pix`](pix) (image decoding and scaling).
+
+## Speed and memory
+
+| Tool | Start | Memory | CPU while idle |
+|---|---|---|---|
+| `term` | 29 ms | 23 MB | 0 |
+| `files` | 27 ms (100 files), 55 ms (10,000) | 27–30 MB | 0 |
+| `image` | 51–95 ms (SVG to 4K PNG) | 45–116 MB | 0 |
+| `video` | 141–150 ms, GPU decode | 147–213 MB | 0 when paused, 2–3% playing |
+| `screenshot` | 20 ms for two 1080p outputs | 34 MB peak | (exits) |
+| `wallpaper` | 16 ms (1080p) to 137 ms (4733x2662) per switch | 2.5 MB | 0 |
+| `clipboard` | (daemon) | under 1 MB + the copy | 0 |
+
+Medians of 20 to 100 runs each, on a 6-core desktop CPU from 2019. Each tool's README
+has the details and how it was measured.
 
 ## Requirements
 
