@@ -1,7 +1,7 @@
 # term
 
-A terminal for Wayland with tabs and a split panel. It draws its own text with FreeType,
-on the CPU.
+A terminal for Wayland with tabs and a split panel. It reads font files and draws its text
+itself, on the CPU.
 
 <!-- screenshot: term -->
 
@@ -12,8 +12,9 @@ on the CPU.
 - Tabs. The tab bar appears once you have two or more. Drag a tab to move it, right click
   to rename it.
 - Text reflows when the window is resized.
-- Own font rendering through FreeType and fontconfig, with fallback fonts for characters
-  the main font lacks. Box-drawing and block characters are drawn by term so lines meet.
+- Own font rendering: TrueType and CFF outlines (.ttf, .otf, .ttc) are read and
+  anti-aliased by our own code; fontconfig only finds the font files, including fallback
+  fonts for characters the main font lacks (CJK, symbols). Box-drawing and block characters are drawn by term so lines meet.
 - 256 colors and true color. Apps can query and set the palette (OSC 4, 10, 11, 12).
 - Mouse reporting (modes 1000, 1002, 1003, 1006), bracketed paste, focus events,
   synchronized output (mode 2026) and the alternate screen.
@@ -204,7 +205,7 @@ little slower. "Start" is from launch until the window is on screen.
 ## Requirements
 
 - Arch Linux (term uses `/proc` and inotify).
-- System libraries: fontconfig, freetype, xkbcommon.
+- System libraries: fontconfig, xkbcommon.
 - A Wayland compositor with `wl_compositor` version 4, `wl_shm` and `xdg_wm_base`.
   Optional: `wl_seat` (keyboard and mouse), `wl_data_device_manager` (clipboard) and
   `wp_cursor_shape_manager_v1` (pointer shapes).

@@ -1,7 +1,7 @@
 //! frame — our own Wayland base for Rust apps, 0 crates.
 //!
 //! [`window`] is one xdg toplevel with shm buffers, keyboard ([`xkb`]), pointer and
-//! clipboard; it speaks Wayland through [`wl`]. [`font`] loads FreeType faces with
+//! clipboard; it speaks Wayland through [`wl`]. [`font`] reads TrueType fonts itself, with
 //! fontconfig fallback. [`ui`] is the look and the widgets on top. [`sys`] holds the
 //! raw libc calls (poll, memfd, inotify). [`png`] writes headless screenshots.
 //! Merged from term (most complete copy).

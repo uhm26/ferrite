@@ -23,7 +23,7 @@ Three of them need nothing but libc.
 
 | Tool | What it does | System libraries |
 |---|---|---|
-| [`term`](term) | Terminal: tabs, reflow, own font rendering | fontconfig, freetype, xkbcommon |
+| [`term`](term) | Terminal: tabs, reflow, own font rendering | fontconfig, xkbcommon |
 | [`files`](files) | File manager: tabs, split view, thumbnails, search, drives, undo | + cairo, librsvg, libwebp |
 | [`image`](image) | Image viewer: PNG, JPEG, GIF, WebP, SVG; zoom, pan, browse a folder | + cairo, librsvg, libwebp |
 | [`video`](video) | Video player on libmpv, GPU decode | + libmpv, EGL, gbm |

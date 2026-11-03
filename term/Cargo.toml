@@ -6,7 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# None on purpose. System C libs via our own bindings: freetype, fontconfig,
+frame = { path = "../frame" } # TrueType reader + rasterizer (same repo; only `frame::font::Face` is used)
+# Otherwise none on purpose. System C libs via our own bindings: fontconfig,
 # xkbcommon (see src/font/, src/xkb.rs).
 
 [lints]

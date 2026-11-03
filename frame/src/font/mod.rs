@@ -3,10 +3,14 @@
 //! Taken from ../term/src/font/mod.rs at term 7be66f5 (2026-11-01): the face and
 //! fallback part; term's cell grid, glyph cache and box drawing stay in term.
 
+mod cff;
+mod face;
 mod fc;
-pub mod ft;
+mod raster;
+mod vary;
+mod ttf;
 
-pub use ft::{Face, Rendered};
+pub use face::{Face, Rendered};
 
 use std::collections::HashSet;
 use std::fmt;
@@ -14,7 +18,6 @@ use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum Error {
-    FreeType,
     NotFound(String),
     Load(PathBuf),
 }
@@ -22,7 +25,6 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::FreeType => write!(f, "FreeType failed to start"),
             Error::NotFound(n) => write!(f, "no font matches {n:?}"),
             Error::Load(p) => write!(f, "cannot load font {}", p.display()),
         }
@@ -38,12 +40,10 @@ pub const ITALIC: usize = 2;
 pub const BOLD_ITALIC: usize = 3;
 
 pub struct Font {
-    // Field order matters: faces drop before the library.
     faces: Vec<Face>,
     fallbacks: Vec<(PathBuf, i32, Face)>,
     /// Characters no installed font has (asked fontconfig once already).
     missing: HashSet<char>,
-    lib: ft::Library,
     family: String,
     pub size: f32,
 }
@@ -58,12 +58,11 @@ impl Font {
     /// One face per fontconfig style suffix (`""`, `":medium"`, `":semibold"` …);
     /// a style index is the position in `styles`.
     pub fn with_styles(family: &str, size: f32, styles: &[&str]) -> Result<Self, Error> {
-        let lib = ft::Library::new().ok_or(Error::FreeType)?;
         let mut faces = Vec::with_capacity(styles.len());
         for style in styles {
             let name = format!("{family}{style}");
             let (path, index) = fc::find(&name, None).ok_or(Error::NotFound(name))?;
-            let mut face = lib.open(&path, index).ok_or(Error::Load(path))?;
+            let mut face = Face::open(&path, index).ok_or(Error::Load(path))?;
             face.set_size(size);
             faces.push(face);
         }
@@ -71,7 +70,6 @@ impl Font {
             faces,
             fallbacks: Vec::new(),
             missing: HashSet::new(),
-            lib,
             family: family.to_string(),
             size,
         })
@@ -111,7 +109,7 @@ impl Font {
                 .fallbacks
                 .iter()
                 .any(|(p, i, _)| *p == path && *i == index)
-            && let Some(mut face) = self.lib.open(&path, index)
+            && let Some(mut face) = Face::open(&path, index)
             && face.has(c)
             && face.set_size(self.size)
         // bitmap-only fonts (color emoji) can't be sized

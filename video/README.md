@@ -136,7 +136,7 @@ little slower. "Start" is from launch until the window is on screen.
   xdg-shell. `video` exits with an error if one is missing.
 - A GPU and driver with EGL on GBM and OpenGL 3.3 or newer (Mesa).
 - System libraries, with their development files to build: libmpv, EGL, gbm,
-  fontconfig, freetype and xkbcommon.
+  fontconfig and xkbcommon.
 - The bar text uses the Adwaita Sans font if it is installed; fontconfig picks a
   fallback otherwise.
 

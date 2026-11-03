@@ -219,7 +219,7 @@ little slower. "Start" is from launch until the window is on screen.
 - A Wayland compositor with `wl_compositor` v4, `wl_shm` and `xdg_wm_base`.
   `wl_data_device_manager` is needed for the clipboard and drag and drop, and
   `wp_cursor_shape_manager_v1` for cursor shapes. Drawing is done on the CPU.
-- System libraries: fontconfig, freetype, xkbcommon, cairo, librsvg, glib (gobject) and
+- System libraries: fontconfig, xkbcommon, cairo, librsvg, glib (gobject) and
   libwebp (`libwebpdemux`). The UI font is Adwaita Sans.
 - `xdg-utils` (`xdg-open`, `xdg-mime`) to open files and pick apps; `bsdtar`
   (libarchive) for Extract and Compress.

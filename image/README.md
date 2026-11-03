@@ -142,7 +142,7 @@ little slower. "Start" is from launch until the window is on screen.
 ## Requirements
 
 - Arch Linux with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
-- System libraries, with their development files to build: fontconfig, freetype,
+- System libraries, with their development files to build: fontconfig,
   xkbcommon, libwebp (libwebpdemux), librsvg, cairo and glib.
 - The window text uses the Adwaita Sans font if it is installed; fontconfig picks a
   fallback otherwise. Text only shows when an image can't be opened.

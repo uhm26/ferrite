@@ -9,7 +9,7 @@ The Wayland base that ferrite's windowed tools share: a window, input, fonts and
 | `wl` | A minimal Wayland client: the wire format over the compositor's socket, opcodes, typed requests. No libwayland. |
 | `window` | One xdg toplevel drawn from shared-memory buffers (a pool of three, reused across resizes). Turns protocol events into a few `Event`s: resize, close, keys, pointer, focus, drag and drop. Also clipboard copy and paste. |
 | `xkb` | Bindings to libxkbcommon: keymap, modifiers, key repeat, keysyms and text. |
-| `font` | FreeType faces in four styles (regular, bold, italic, bold italic), with fontconfig fallback for missing characters. |
+| `font` | Our own font reader and rasterizer: TrueType (incl. variable fonts and collections) and CFF outlines, anti-aliased by exact pixel coverage. Faces in several styles, with fontconfig fallback for missing characters. |
 | `ui` | The shared flat look and the widgets: theme tokens, antialiased shapes, cached text, line icons, springs, an immediate-mode context (`State`, `Ui`), buttons, switches, rows, a text field, context menus and the app shell (sidebar, toolbar, status band). |
 | `sys` | The few libc calls std does not wrap: `poll`, memfd and mmap, fd passing, inotify folder watching (`sys::watch::Watch`). |
 | `png` | A tiny PNG writer (uncompressed) for headless screenshots. |
@@ -88,7 +88,7 @@ None. Everything is always built.
 ## Requirements
 
 - A Wayland compositor with xdg-shell.
-- System libraries, with their development files: `fontconfig`, `freetype` and
+- System libraries, with their development files: `fontconfig` and
   `xkbcommon`. frame binds them itself (`#[link(name = …)]`), so no `-sys` crates are
   involved.
 - The UI's default font is Adwaita Sans (`theme::FAMILY`); fontconfig picks a fallback
