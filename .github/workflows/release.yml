@@ -21,7 +21,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel rust git github-cli \
             fontconfig freetype2 libxkbcommon librsvg cairo glib2 libwebp \
-            mpv mesa libglvnd libarchive
+            mpv mesa libglvnd libarchive adwaita-fonts dbus
 
       - uses: actions/checkout@v5
 
@@ -44,7 +44,10 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Test
-        run: cargo test -q --release -p "${{ steps.tag.outputs.tool }}"
+        # Tests open the Adwaita fonts and talk to real D-Bus buses (files).
+        run: |
+          mkdir -p /run/dbus && dbus-daemon --system --fork
+          dbus-run-session -- cargo test -q --release -p "${{ steps.tag.outputs.tool }}"
 
       - name: Build
         run: cargo build --release -p "${{ steps.tag.outputs.tool }}"

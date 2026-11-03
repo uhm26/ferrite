@@ -29,8 +29,8 @@ jobs:
       - name: Install and run in a clean Arch container
         run: |
           docker run --rm -v "$PWD:/ferrite" -w /ferrite archlinux:latest sh -euc '
-            # A user system has a shell, curl and fonts; nothing ferrite-specific.
-            pacman -Syu --noconfirm --needed ttf-dejavu ffmpeg >/dev/null
+            # A bare Arch: no fonts, no ferrite deps. install.sh must ask for all of it.
+            pacman -Sy --noconfirm >/dev/null
             export FERRITE_MIRROR=/ferrite/mirror HOME=/root XDG_DATA_HOME=/root/.local/share
             hints=""
             while read -r t v; do
@@ -48,6 +48,7 @@ jobs:
             echo "== start every tool"
             b=/root/.local/bin
             "$b/term" --version
+            pacman -S --noconfirm --needed ffmpeg >/dev/null  # demo files only, after the dependency check
             mkdir -p /tmp/demo/pics
             ffmpeg -loglevel error -f lavfi -i "mandelbrot=s=320x200" -frames:v 1 /tmp/demo/pics/a.png
             ffmpeg -loglevel error -f lavfi -i "testsrc2=s=320x240:r=10" -t 2 -pix_fmt yuv420p /tmp/demo/v.mp4

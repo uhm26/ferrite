@@ -141,6 +141,11 @@ missing_packages() {
     esac
     need=$(ldd "$dir/$1" 2>/dev/null | awk '/not found/ {print $1}')
     for p in $progs; do has "$p" || need="$need $p"; done
+    # The GUI tools draw with Adwaita Sans/Mono; without it they fall back to another font.
+    case "$1" in
+        term | files | image | video)
+            if ! fc-list : family 2>/dev/null | grep -q "Adwaita"; then need="$need adwaita-fonts"; fi ;;
+    esac
     pkgs=""
     for n in $need; do
         p=$(pkg_of "$n")

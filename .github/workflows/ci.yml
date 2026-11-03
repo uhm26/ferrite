@@ -16,12 +16,15 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed base-devel rust git \
             fontconfig freetype2 libxkbcommon librsvg cairo glib2 libwebp \
-            mpv mesa libglvnd libarchive
+            mpv mesa libglvnd libarchive adwaita-fonts dbus
       - uses: actions/checkout@v5
       - name: Clippy
         run: cargo clippy -q --workspace --all-targets -- -D warnings
       - name: Test
-        run: cargo test -q --workspace
+        # Tests open the Adwaita fonts and talk to real D-Bus buses (files).
+        run: |
+          mkdir -p /run/dbus && dbus-daemon --system --fork
+          dbus-run-session -- cargo test -q --workspace
 
   shellcheck:
     runs-on: ubuntu-latest
