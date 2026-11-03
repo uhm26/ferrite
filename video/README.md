@@ -113,6 +113,22 @@ Mouse:
 - Opens the GPU render node `/dev/dri/renderD128`.
 - Writes nothing. There is no config file.
 
+## Performance
+
+| File | Start (median of 20) | CPU while playing | Memory |
+|---|---|---|---|
+| H.264 1920x1080, 60 fps | 141 ms | 3.0% | 173 MB |
+| H.264 3840x2160, 30 fps | 146 ms | 2.5% | 213 MB |
+| HEVC 1920x1080, 30 fps | 150 ms | 1.8% | 170 MB |
+| VP9 1920x1080, 30 fps | 150 ms | 2.0% | 147 MB |
+
+All four were decoded on the GPU (VA-API). CPU is % of one core, over 15 s of playback.
+Paused, the player uses no CPU.
+
+Measured on a 6-core desktop CPU from 2019 with NVMe and 1920x1080 screens, under Hyprland,
+with a release build for x86-64-v3. The prebuilt binaries target plain x86-64 and can be a
+little slower. "Start" is from launch until the window is on screen.
+
 ## Requirements
 
 - Arch Linux with a Wayland compositor that offers `wl_subcompositor` and

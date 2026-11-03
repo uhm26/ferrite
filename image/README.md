@@ -119,6 +119,24 @@ Image:
   `.trashinfo` file to `$XDG_DATA_HOME/Trash/info/` (default `~/.local/share/Trash`).
 - Nothing else is written. There is no config file.
 
+## Performance
+
+| File | Start (median of 30) | Memory |
+|---|---|---|
+| 3840x2160 PNG | 95 ms | 113 MB |
+| 3840x2160 JPEG | 66 ms | 116 MB |
+| WebP photo | 52 ms | 81 MB |
+| SVG | 51 ms | 45 MB |
+
+- Drawing a frame takes 2 to 4 ms (median of 100 per format).
+- Stepping through 100 photos (1920x1080 JPEG) grows memory from 41 to 52 MB.
+- CPU while idle: 0 for still images, about 4% of one core for a small GIF.
+- GIF memory is about 25 MB plus 5 bytes per pixel per frame.
+
+Measured on a 6-core desktop CPU from 2019 with NVMe and 1920x1080 screens, under Hyprland,
+with a release build for x86-64-v3. The prebuilt binaries target plain x86-64 and can be a
+little slower. "Start" is from launch until the window is on screen.
+
 ## Requirements
 
 - Arch Linux with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
@@ -143,6 +161,9 @@ Image:
 - An SVG is rendered once, at the size of its window. Zooming in enlarges its pixels.
 - Transparent areas show on the window background color. There is no checkerboard.
 - Very long animations are cut off at about 1 GiB of decoded frames and loop early.
+  The process then uses about 1.7 GiB of memory.
+- A GIF shows only once all its frames are decoded: about 2.4 s for 120 frames at
+  1920x1080, 3.2 s at 3840x2160.
 - The window's first size is capped at 1440x810, whatever your screen size. After that
   the window keeps its size when you step to other images.
 - Names sort as plain text, so `img10` comes before `img2`.

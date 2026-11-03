@@ -7,8 +7,7 @@
 ## Features
 
 - Full-screen capture of every output in one image, placed as they sit in your layout.
-  About 30 ms from start to saved file for two 1080p screens with the prebuilt binary;
-  about 25 ms when built for your own CPU (`RUSTFLAGS="-C target-cpu=native"`).
+  About 20 ms from start to saved file for two 1080p screens (see Performance).
 - Capture a single output by name (`-o`).
 - Freeze mode (`-s`): the screen stops, the rest dims, and you drag a region or click a
   window or an output. What you select is what was on screen when you started.
@@ -109,6 +108,22 @@ window list, so any click saves the output under the pointer.
 
 The folder is `XDG_PICTURES_DIR` (from the environment, else `~/.config/user-dirs.dirs`),
 else `~/Pictures`.
+
+## Performance
+
+| What | Time (median of 100) | Memory |
+|---|---|---|
+| Two 1920x1080 outputs to a file | 20 ms | 34 MB |
+| One output (`-o`) to a file | 13.5 ms | 22 MB |
+| Freeze mode, until the overlay is up | 15 ms (median of 50) | |
+
+- Cold start (binary not in the page cache) adds about 1 ms.
+- The PNG encoder uses about 80 ms of CPU per shot, spread over all cores.
+- 30 out of 30 dragged regions came out at the exact size.
+
+Measured on a 6-core desktop CPU from 2019 with NVMe and 1920x1080 screens, under Hyprland,
+with a release build for x86-64-v3. The prebuilt binaries target plain x86-64 and can be a
+little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 

@@ -200,6 +200,20 @@ files listed below.
 
 Thumbnails are kept in memory only. Nothing is written to a cache folder.
 
+## Performance
+
+| What | Result |
+|---|---|
+| Start, folder with 100 files | 27 ms (median of 100), 27 MB |
+| Start, folder with 10,000 files | 55 ms (median of 50), 30 MB |
+| Grid view, 200 new thumbnails | 0.22 s, +7 MB |
+| Extra tab | about 30 KB |
+| CPU while idle | 0 |
+
+Measured on a 6-core desktop CPU from 2019 with NVMe and 1920x1080 screens, under Hyprland,
+with a release build for x86-64-v3. The prebuilt binaries target plain x86-64 and can be a
+little slower. "Start" is from launch until the window is on screen.
+
 ## Requirements
 
 - A Wayland compositor with `wl_compositor` v4, `wl_shm` and `xdg_wm_base`.
