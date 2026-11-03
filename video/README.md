@@ -1,6 +1,6 @@
 # video
 
-> A small video player for Wayland, built on libmpv.
+A video player on top of libmpv. Decodes on the GPU when it can.
 
 <!-- screenshot: video -->
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="ferrite: small, fast desktop tools for Wayland, written in Rust" width="100%">
+<img src="assets/banner.svg" alt="ferrite: my Wayland desktop apps, written in Rust" width="100%">
 
 <br>
 
@@ -9,7 +9,10 @@
 [![Rust](https://img.shields.io/badge/written%20in-Rust-242424?style=flat-square&labelColor=111111)](#build-from-source)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-242424?style=flat-square&labelColor=111111)](#license)
 
-Few dependencies, monochrome look, built to stay out of your way.
+A terminal, file manager, image viewer, video player, screenshot tool, wallpaper setter and
+clipboard keeper, made for my own Hyprland setup. I built them with Claude: I decide what
+each app does and how it looks, Claude writes most of the code, and I use them every day.
+Three of them need nothing but libc.
 
 <img src="assets/files.png" alt="files, the file manager" width="49%">
 <img src="assets/image.png" alt="image, the image viewer" width="49%">

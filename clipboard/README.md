@@ -1,6 +1,6 @@
 # clipboard
 
-> A Wayland clipboard keeper: your last copy stays pasteable after the app you copied from closes.
+On Wayland, closing an app throws away whatever you copied from it. This keeps it.
 
 <!-- screenshot: clipboard -->
 
@@ -17,9 +17,10 @@
 - Skips copies that password managers mark as secret (`x-kde-passwordManagerHint`).
 - Slow or stuck apps never block it: all transfers are non-blocking, and many pastes
   can be served at once.
-- Asleep when idle: no timers, no wakeups. About 2 MB of memory plus the size of the
+- Uses no CPU while nothing happens (no timers). About 2 MB of memory plus the size of the
   kept copy.
-- No crates, no system libraries beyond libc. It speaks the Wayland wire protocol itself.
+- Needs only libc. It talks to the compositor over the Wayland socket directly, without
+  libwayland or any crates.
 
 ## Install
 

@@ -1,6 +1,6 @@
 # frame
 
-> The Wayland base that ferrite's windowed tools share: a window, input, fonts and a flat UI toolkit, with no crate dependencies.
+The Wayland base that ferrite's windowed tools share: a window, input, fonts and a flat UI toolkit, with no crate dependencies.
 
 ## What's inside
 

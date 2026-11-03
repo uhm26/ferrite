@@ -1,6 +1,7 @@
 # wallpaper
 
-> A small Wayland wallpaper daemon: `wallpaper <image>` shows an image on every output.
+Run `wallpaper pic.jpg` and it is your wallpaper on every screen. Run it again with
+another image to switch.
 
 <!-- screenshot: wallpaper -->
 
@@ -11,12 +12,12 @@
 - PNG and JPEG. A GIF shows its first frame. JPEG photos are turned upright from their
   EXIF orientation.
 - The first call starts the daemon; later calls hand it a new image and exit.
-- A bare `wallpaper` shows the last image again, which is handy at login.
+- A bare `wallpaper` shows the last image again (put that in your autostart).
 - Covers the full output, also under bars that reserve space.
 - Outputs with the same size share one decode and one buffer. Outputs added later get
   the wallpaper too; integer output scales are drawn at full resolution.
 - Idle memory is about 3 MB: the decoded image is freed after drawing.
-- No system libraries beyond libc. It speaks the Wayland wire protocol itself; image
+- Needs only libc. It talks to the compositor over the Wayland socket directly; image
   decoding comes from the workspace's [`pix`](../pix) library.
 
 ## Install

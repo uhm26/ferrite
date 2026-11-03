@@ -1,6 +1,6 @@
 # files
 
-> A Wayland file manager with a Nemo-like layout: places on the left, a list or grid of files on the right.
+A file manager laid out like Nemo: places on the left, a list or grid of files on the right.
 
 ![files](../assets/files.png)
 

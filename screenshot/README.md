@@ -1,6 +1,7 @@
 # screenshot
 
-> A fast Wayland screenshot tool: capture the whole screen, or freeze it and pick a region or window.
+Takes a screenshot in about 20 ms. Or freezes the screen so you can pick a region or a
+window.
 
 <!-- screenshot: screenshot -->
 
@@ -16,7 +17,8 @@
 - Shots from freeze mode are saved to a file and copied to the clipboard as `image/png`.
 - Write to a file or to stdout (`-`) for piping.
 - Own PNG encoder: filters and compresses stripes of the image on all CPU cores.
-- No crates, no system libraries beyond libc. It speaks the Wayland wire protocol itself.
+- Needs only libc. It talks to the compositor over the Wayland socket directly, without
+  libwayland or any crates.
 
 ## Install
 

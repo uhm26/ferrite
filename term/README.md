@@ -1,6 +1,7 @@
 # term
 
-> A small, fast terminal emulator for Wayland, with tabs, a split panel and its own font rendering.
+A terminal for Wayland with tabs and a split panel. It draws its own text with FreeType,
+on the CPU.
 
 <!-- screenshot: term -->
 
