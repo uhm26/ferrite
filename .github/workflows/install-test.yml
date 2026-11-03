@@ -20,7 +20,7 @@ jobs:
         run: |
           set -eu
           : > versions
-          for t in term files image video screenshot wallpaper clipboard; do
+          for t in term files image video screenshot wallpaper clipboard auth; do
             tag=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq ".[].tagName" | grep "^$t-v" | head -n 1)
             gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "mirror/$tag"
             echo "$t ${tag#"$t"-v}" >> versions
@@ -42,7 +42,7 @@ jobs:
             echo "== installing what install.sh asked for:$hints"
             [ -z "${hints# }" ] || pacman -S --noconfirm --needed $hints >/dev/null
             echo "== nothing may be missing now"
-            for t in term files image video screenshot wallpaper clipboard; do
+            for t in term files image video screenshot wallpaper clipboard auth; do
               if ldd "/root/.local/bin/$t" | grep "not found"; then echo "$t still misses libraries"; exit 1; fi
             done
             echo "== start every tool"
@@ -63,5 +63,8 @@ jobs:
               grep -q "wayland socket" err || { cat err; exit 1; }
             done
             "$b/wallpaper" 2>&1 | grep -q usage
-            echo "== all 7 tools installed and started"
+            # auth needs a login session (logind) before anything else.
+            if "$b/auth" 2>err; then echo "auth ran without a session?"; exit 1; fi
+            grep -q "XDG_SESSION_ID" err || { cat err; exit 1; }
+            echo "== all 8 tools installed and started"
           '

@@ -13,6 +13,7 @@ The Wayland base that ferrite's windowed tools share: a window, input, fonts and
 | `ui` | The shared flat look and the widgets: theme tokens, antialiased shapes, cached text, line icons, springs, an immediate-mode context (`State`, `Ui`), buttons, switches, rows, a text field, context menus and the app shell (sidebar, toolbar, status band). |
 | `sys` | The few libc calls std does not wrap: `poll`, memfd and mmap, fd passing, inotify folder watching (`sys::watch::Watch`). |
 | `png` | A tiny PNG writer (uncompressed) for headless screenshots. |
+| `dbus` | Our own D-Bus client and service over the session or system bus: wire format, messages, SASL login, one blocking connection with a poll-friendly read. |
 
 Run `cargo run --example window` for the smallest app, or
 `cargo run --release --example gallery` to see every widget.
@@ -22,6 +23,7 @@ Run `cargo run --example window` for the smallest app, or
 - [`files`](../files)
 - [`image`](../image)
 - [`video`](../video)
+- [`auth`](../auth)
 
 ## Example
 

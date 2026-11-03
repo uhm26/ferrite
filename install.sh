@@ -12,7 +12,7 @@
 set -eu
 
 REPO="uhm26/ferrite"
-TOOLS="term files image video screenshot wallpaper clipboard"
+TOOLS="term files image video screenshot wallpaper clipboard auth"
 
 say() { printf 'ferrite: %s\n' "$*"; }
 die() { printf 'ferrite: error: %s\n' "$*" >&2; exit 1; }
@@ -127,6 +127,7 @@ pkg_of() {
         libgbm.so.1) echo mesa ;;
         xdg-open) echo xdg-utils ;;
         bsdtar) echo libarchive ;;
+        pkexec) echo polkit ;;
         *) echo "$1" ;;
     esac
 }
@@ -137,13 +138,14 @@ missing_packages() {
     case "$1" in
         term) progs="xdg-open" ;;
         files) progs="xdg-open bsdtar" ;;
+        auth) progs="pkexec" ;;
         *) progs="" ;;
     esac
     need=$(ldd "$dir/$1" 2>/dev/null | awk '/not found/ {print $1}')
     for p in $progs; do has "$p" || need="$need $p"; done
     # The GUI tools draw with Adwaita Sans/Mono; without it they fall back to another font.
     case "$1" in
-        term | files | image | video)
+        term | files | image | video | auth)
             if ! fc-list : family 2>/dev/null | grep -q "Adwaita"; then need="$need adwaita-fonts"; fi ;;
     esac
     pkgs=""
@@ -157,6 +159,7 @@ missing_packages() {
 
 notes_for() {
     case "$1" in
+        auth) say "auth is a daemon: start it with your session (e.g. Hyprland: exec-once = auth); only one polkit agent can run" ;;
         clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = clipboard; sway: exec clipboard)" ;;
         wallpaper) say "wallpaper: run wallpaper IMAGE once; start a bare wallpaper with your session to restore it" ;;
         screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to your Pictures folder" ;;

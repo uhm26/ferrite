@@ -9,9 +9,10 @@
 [![Rust](https://img.shields.io/badge/written%20in-Rust-242424?style=flat-square&labelColor=111111)](#build-from-source)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-242424?style=flat-square&labelColor=111111)](#license)
 
-A terminal, file manager, image viewer, video player, screenshot tool, wallpaper setter and
-clipboard keeper, made for my own Hyprland setup. I built them with Claude: I decide what
-each app does and how it looks, Claude writes most of the code, and I use them every day.
+A terminal, file manager, image viewer, video player, screenshot tool, wallpaper setter,
+clipboard keeper and polkit password popup, made for my own Hyprland setup. I built them
+with Claude: I decide what each app does and how it looks, Claude writes most of the code,
+and I use them every day.
 Three of them need nothing but libc.
 
 <img src="assets/files.png" alt="files, the file manager" width="49%">
@@ -30,6 +31,7 @@ Three of them need nothing but libc.
 | [`screenshot`](screenshot) | Full screen in ~20 ms, or freeze + pick a region or window | none |
 | [`wallpaper`](wallpaper) | Wallpaper daemon: `wallpaper <image>` | none |
 | [`clipboard`](clipboard) | Keeps your last copy (text or image) alive after its app closes | none |
+| [`auth`](auth) | Password popup when an app needs more rights (polkit agent) | fontconfig, xkbcommon |
 
 Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 [`pix`](pix) (image decoding and scaling).
@@ -45,6 +47,7 @@ Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 | `screenshot` | 20 ms for two 1080p outputs | 34 MB peak | (exits) |
 | `wallpaper` | 16 ms (1080p) to 137 ms (4733x2662) per switch | 2.5 MB | 0 |
 | `clipboard` | (daemon) | under 1 MB + the copy | 0 |
+| `auth` | (daemon) | 3.8 MB while no popup is open | 0 |
 
 Medians of 20 to 100 runs each, on a 6-core desktop CPU from 2019. Each tool's README
 has the details and how it was measured.
@@ -55,6 +58,7 @@ has the details and how it was measured.
 - `wallpaper` and the `screenshot` freeze overlay need wlr-layer-shell; `screenshot` needs
   wlr-screencopy; `clipboard` needs ext- or wlr-data-control. Hyprland, sway and niri have
   them; GNOME does not. Picking a window in `screenshot` uses Hyprland.
+- `auth` needs polkit 126 or newer (its socket-activated helper) and a logind session.
 
 ## Install
 

@@ -32,7 +32,7 @@ jobs:
           tool="${tag%-v*}"
           version="${tag##*-v}"
           case "$tool" in
-            term|files|image|video|screenshot|wallpaper|clipboard) ;;
+            term|files|image|video|screenshot|wallpaper|clipboard|auth) ;;
             *) echo "no release build for '$tool'" >&2; exit 1 ;;
           esac
           grep -q "^version = \"$version\"$" "$tool/Cargo.toml" \
