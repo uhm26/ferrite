@@ -12,6 +12,7 @@ members = [
     "screenshot",
     "wallpaper",
     "clipboard",
+    "auth",
 ]
 
 [workspace.package]
