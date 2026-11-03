@@ -1,17 +1,28 @@
 # auth
 
 A polkit authentication agent for Wayland: the window that asks for your password when an
-app needs more rights, such as mounting an internal disk in a file manager.
+app needs more rights, such as mounting an internal disk in a file manager or `pkexec`.
 
-**Not built yet.** This folder only holds the plan's skeleton.
-
-Planned:
-
-- Registers with polkit as the agent of your session and stays running.
-- Shows what is being asked for and by which program, plus a password field.
-- Never checks the password itself: it hands what you type to polkit's own helper
-  (`polkit-agent-helper-1`), which does the check.
+- Registers with polkit as the agent of your session and stays running. Start it once per
+  session, e.g. from your compositor's autostart.
+- Shows what is asked for, which program asks, and whose password it wants.
+- Never checks the password itself: it hands what you type to polkit's own helper, which
+  does the check. A wrong password shows an error and lets you try again.
 - Built on the workspace's [`frame`](../frame) library, in the same look as the other tools.
+
+## Keys
+
+| Key | Does |
+|---|---|
+| Enter | Authenticate |
+| Esc | Cancel |
+| Backspace | Delete one character; with Ctrl, clear the field |
+| Ctrl+U | Clear the field |
+
+## Requirements
+
+polkit 126 or newer with `polkit-agent-helper.socket` (Arch's polkit has it), a Wayland
+compositor, and `XDG_SESSION_ID` set in the environment (logind sets it at login).
 
 ## License
 

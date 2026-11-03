@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+frame = { path = "../frame" } # our D-Bus, Wayland window + ui (same repo)
 
 [lints]
 workspace = true
