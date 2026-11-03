@@ -11,7 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use frame::sys::{POLLIN, PollFd};
 
-use crate::dbus::{Conn, Error, Value};
+use frame::dbus::{Conn, Error, Value};
 
 const UDISKS: &str = "org.freedesktop.UDisks2";
 const ROOT: &str = "/org/freedesktop/UDisks2";
@@ -263,7 +263,7 @@ fn mount_point(fs: &Value) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dbus::Type;
+    use frame::dbus::Type;
 
     fn sv(pairs: Vec<(&str, Value)>) -> Value {
         Value::dict_sv(pairs)

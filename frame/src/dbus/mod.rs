@@ -1,6 +1,6 @@
 //! Own D-Bus client and service, std only: wire format, messages, one blocking connection.
 //!
-//! Enough for udisks2 on the system bus and a portal backend on the session bus.
+//! Enough for udisks2 and a polkit agent on the system bus, a portal backend on the session bus.
 //! Sends little endian, reads both byte orders. No fd passing.
 
 mod conn;

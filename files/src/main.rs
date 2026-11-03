@@ -7,7 +7,6 @@
 mod app;
 mod apps;
 mod bookmarks;
-mod dbus;
 mod browse;
 mod dir;
 mod drives;

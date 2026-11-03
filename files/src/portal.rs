@@ -13,7 +13,7 @@ use std::sync::mpsc::channel;
 
 use frame::sys::{POLLIN, PollFd};
 
-use crate::dbus::{Conn, Kind, Message, Type, Value};
+use frame::dbus::{Conn, Kind, Message, Type, Value};
 use crate::uri;
 
 const NAME: &str = "org.freedesktop.impl.portal.desktop.files";
