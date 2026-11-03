@@ -4,11 +4,11 @@ version = 4
 
 [[package]]
 name = "clipboard"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "files"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame",
  "pix",
@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "image"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame",
  "pix",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "screenshot"
-version = "0.1.1"
+version = "0.2.0"
 
 [[package]]
 name = "simd-adler32"
@@ -57,18 +57,18 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "term"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "video"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame",
 ]
 
 [[package]]
 name = "wallpaper"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pix",
 ]
