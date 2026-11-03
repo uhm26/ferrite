@@ -153,6 +153,8 @@ impl View {
             (_, KEY_BACKSPACE) => b.up(),
             (_, KEY_ESCAPE) if !b.filter.is_empty() => b.set_filter(""),
             (_, KEY_ESCAPE) if b.search.is_some() => b.end_search(),
+            // A file dialog: Esc cancels it, as in every other picker.
+            (_, KEY_ESCAPE) if self.pick.is_some() && self.find.is_empty() => self.quit = true,
             (_, KEY_ESCAPE) => b.marked.clear(), // and the find text, below
             (_, KEY_RETURN) => self.open_entry(b),
             (_, KEY_HOME) => b.step(-isize::MAX),

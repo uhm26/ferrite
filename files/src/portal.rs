@@ -110,9 +110,23 @@ fn bytes_path(b: &[u8]) -> PathBuf {
     PathBuf::from(std::ffi::OsStr::from_bytes(b))
 }
 
+/// Our binary, for the picker windows. This backend lives for the whole session, so the
+/// file may have been replaced by an update since it started: Linux then names it
+/// "<path> (deleted)", which can't be run; the new binary at <path> can.
+fn own_exe() -> Option<PathBuf> {
+    Some(live_path(std::env::current_exe().ok()?))
+}
+
+fn live_path(p: PathBuf) -> PathBuf {
+    match p.to_str().and_then(|s| s.strip_suffix(" (deleted)")) {
+        Some(s) if !p.exists() => PathBuf::from(s),
+        _ => p,
+    }
+}
+
 /// Run a picker window for the request; the paths picked, None if cancelled.
 fn pick(msg: &Message) -> Option<Vec<PathBuf>> {
-    let out = Command::new(std::env::current_exe().ok()?)
+    let out = Command::new(own_exe()?)
         .args(pick_args(msg))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -175,6 +189,20 @@ fn pick_args(msg: &Message) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_replaced_binary_is_run_from_its_path() {
+        let gone = PathBuf::from("/nonexistent/files (deleted)");
+        assert_eq!(live_path(gone), PathBuf::from("/nonexistent/files"));
+        // A real file whose name ends that way is left alone.
+        let dir = std::env::temp_dir().join(format!("files-exe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let odd = dir.join("x (deleted)");
+        std::fs::write(&odd, "").unwrap();
+        let kept = live_path(odd.clone());
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(kept, odd);
+    }
 
     fn request(member: &str, opts: Vec<(&str, Value)>) -> Message {
         let body = vec![
