@@ -20,8 +20,11 @@ jobs:
         run: |
           set -eu
           : > versions
+          # One API call: a failed one (GitHub 504s) must stop the run, not leave a tag empty.
+          tags=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq ".[].tagName")
           for t in term files image video screenshot wallpaper clipboard auth; do
-            tag=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq ".[].tagName" | grep "^$t-v" | head -n 1)
+            tag=$(echo "$tags" | grep "^$t-v" | head -n 1)
+            [ -n "$tag" ] || { echo "no release of $t"; exit 1; }
             gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "mirror/$tag"
             echo "$t ${tag#"$t"-v}" >> versions
           done
