@@ -23,7 +23,7 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, static, no root):
+Prebuilt for Arch Linux (x86_64), no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- clipboard
@@ -73,7 +73,7 @@ a small lock file, so a second start in the same session just says "already runn
 
 ## Requirements
 
-- Linux, glibc. Tested on x86_64.
+- Arch Linux (x86_64).
 - No system libraries beyond libc.
 - Wayland protocols: `ext_data_control_manager_v1` (preferred) or
   `zwlr_data_control_manager_v1`, and `wl_seat`.

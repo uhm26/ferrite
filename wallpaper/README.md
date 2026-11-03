@@ -21,7 +21,7 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, static, no root):
+Prebuilt for Arch Linux (x86_64), no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- wallpaper
@@ -99,7 +99,7 @@ Socket protocol: the client writes the absolute image path and a newline (at mos
 
 ## Requirements
 
-- Linux, glibc.
+- Arch Linux (x86_64).
 - No system libraries beyond libc.
 - Wayland protocols: `wl_compositor` (version 4), `wl_shm`, `wl_output` (version 2 or
   newer), and `zwlr_layer_shell_v1`.

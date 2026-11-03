@@ -33,8 +33,8 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, glibc 2.35+, no root). The installer also adds a menu entry and tells
-you which system libraries are missing, if any:
+Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+one `pacman` line for anything still missing:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term
@@ -187,7 +187,7 @@ original, so a crash never leaves half a file.
 
 ## Requirements
 
-- Linux (term uses `/proc` and inotify).
+- Arch Linux (term uses `/proc` and inotify).
 - System libraries: fontconfig, freetype, xkbcommon.
 - A Wayland compositor with `wl_compositor` version 4, `wl_shm` and `xdg_wm_base`.
   Optional: `wl_seat` (keyboard and mouse), `wl_data_device_manager` (clipboard) and

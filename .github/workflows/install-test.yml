@@ -1,0 +1,66 @@
+# Install the newest release of every tool into a clean Arch Linux container, the way a user
+# would: install.sh, then exactly the pacman line it prints, then start every tool.
+# Run by hand (Actions → install-test → Run workflow) after releases.
+name: install-test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-arch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download the newest release of each tool
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          : > versions
+          for t in term files image video screenshot wallpaper clipboard; do
+            tag=$(gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq ".[].tagName" | grep "^$t-v" | head -n 1)
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" -D "mirror/$tag"
+            echo "$t ${tag#"$t"-v}" >> versions
+          done
+          cat versions
+      - name: Install and run in a clean Arch container
+        run: |
+          docker run --rm -v "$PWD:/ferrite" -w /ferrite archlinux:latest sh -euc '
+            # A user system has a shell, curl and fonts; nothing ferrite-specific.
+            pacman -Syu --noconfirm --needed ttf-dejavu ffmpeg >/dev/null
+            export FERRITE_MIRROR=/ferrite/mirror HOME=/root XDG_DATA_HOME=/root/.local/share
+            hints=""
+            while read -r t v; do
+              out=$(sh install.sh --version "$v" "$t" 2>&1)
+              echo "$out"
+              line=$(echo "$out" | grep -o "sudo pacman -S --needed.*" || true)
+              hints="$hints ${line#sudo pacman -S --needed}"
+            done < versions
+            echo "== installing what install.sh asked for:$hints"
+            [ -z "${hints# }" ] || pacman -S --noconfirm --needed $hints >/dev/null
+            echo "== nothing may be missing now"
+            for t in term files image video screenshot wallpaper clipboard; do
+              if ldd "/root/.local/bin/$t" | grep "not found"; then echo "$t still misses libraries"; exit 1; fi
+            done
+            echo "== start every tool"
+            b=/root/.local/bin
+            "$b/term" --version
+            mkdir -p /tmp/demo/pics
+            ffmpeg -loglevel error -f lavfi -i "mandelbrot=s=320x200" -frames:v 1 /tmp/demo/pics/a.png
+            ffmpeg -loglevel error -f lavfi -i "testsrc2=s=320x240:r=10" -t 2 -pix_fmt yuv420p /tmp/demo/v.mp4
+            "$b/image" --png /tmp/demo/image.png --size 320x200 /tmp/demo/pics/a.png
+            "$b/files" --png /tmp/demo/files.png --size 640x400 /tmp/demo/pics
+            "$b/video" --png /tmp/demo/video.png --size 320x240 /tmp/demo/v.mp4
+            for f in image files video; do test -s "/tmp/demo/$f.png" || { echo "$f rendered nothing"; exit 1; }; done
+            # Daemons and screenshot need a compositor: they must start and fail cleanly without one.
+            export XDG_RUNTIME_DIR=/tmp/rt WAYLAND_DISPLAY=none; mkdir -p "$XDG_RUNTIME_DIR"
+            for t in screenshot clipboard; do
+              if "$b/$t" /tmp/x.png 2>err; then echo "$t ran without a compositor?"; exit 1; fi
+              grep -q "wayland socket" err || { cat err; exit 1; }
+            done
+            "$b/wallpaper" 2>&1 | grep -q usage
+            echo "== all 7 tools installed and started"
+          '

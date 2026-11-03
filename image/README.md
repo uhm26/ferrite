@@ -28,8 +28,8 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, glibc 2.35+, no root). The installer also adds a menu entry and tells
-you which system libraries are missing, if any:
+Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+one `pacman` line for anything still missing:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- image
@@ -121,7 +121,7 @@ Image:
 
 ## Requirements
 
-- Linux with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
+- Arch Linux with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
 - System libraries, with their development files to build: fontconfig, freetype,
   xkbcommon, libwebp (libwebpdemux), librsvg, cairo and glib.
 - The window text uses the Adwaita Sans font if it is installed; fontconfig picks a

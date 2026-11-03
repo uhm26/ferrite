@@ -1,5 +1,5 @@
-# Checks on every push and pull request: lints + tests for the whole workspace, and the
-# installer under dash (Ubuntu's /bin/sh, strict POSIX) with a fake release.
+# Checks on every push and pull request, in Arch Linux (the one supported system): lints +
+# tests for the whole workspace, and install.sh under dash (strict POSIX) with a fake release.
 name: ci
 
 on:
@@ -9,36 +9,37 @@ on:
 
 jobs:
   rust:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    container: archlinux:latest
     steps:
+      - name: Arch packages
+        run: |
+          pacman -Syu --noconfirm --needed base-devel rust git \
+            fontconfig freetype2 libxkbcommon librsvg cairo glib2 libwebp \
+            mpv mesa libglvnd libarchive
       - uses: actions/checkout@v5
-      - name: System libraries
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends \
-            libfontconfig-dev libfreetype-dev libxkbcommon-dev \
-            librsvg2-dev libcairo2-dev libglib2.0-dev libwebp-dev \
-            libmpv-dev libegl-dev libgbm-dev libarchive-tools
-      - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
       - name: Clippy
         run: cargo clippy -q --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test -q --workspace
 
-  installer:
-    runs-on: ubuntu-24.04
+  shellcheck:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: shellcheck
-        run: shellcheck --shell=sh install.sh
+      - run: shellcheck --shell=sh install.sh
+
+  installer:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - run: pacman -Syu --noconfirm --needed dash
+      - uses: actions/checkout@v5
       - name: Install a fake release under dash
         run: |
           set -eu
           m="$RUNNER_TEMP/mirror/clipboard-v9.9.9"
-          a=clipboard-x86_64-linux-musl
+          a=clipboard-x86_64-linux
           mkdir -p "$m" "$RUNNER_TEMP/pkg/$a"
           printf '#!/bin/sh\necho fake\n' > "$RUNNER_TEMP/pkg/$a/clipboard"
           tar -C "$RUNNER_TEMP/pkg" -czf "$m/$a.tar.gz" "$a"

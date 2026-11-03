@@ -18,14 +18,14 @@ Libraries the tools share: [`frame`](frame) (windows, input, fonts, UI) and
 
 ## Requirements
 
-- Linux with a Wayland compositor.
+- Arch Linux (or an Arch-based distro), x86_64, with a Wayland compositor. No other systems.
 - `wallpaper` and the `screenshot` freeze overlay need wlr-layer-shell; `screenshot` needs
   wlr-screencopy; `clipboard` needs ext- or wlr-data-control. Hyprland, sway and niri have
   them; GNOME does not. Picking a window in `screenshot` uses Hyprland.
 
 ## Install
 
-Prebuilt binaries for x86_64 Linux, checked with SHA-256, installed to `~/.local/bin` (no root):
+Prebuilt for Arch Linux (x86_64), checked with SHA-256, installed to `~/.local/bin` (no root):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term files    # any tools
@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh 
 
 Every tool is prebuilt. Run it again to update; `--uninstall` removes a tool (and its menu
 entry), `--help` lists the options. Tools that need system libraries tell you the exact
-packages to install for your distro.
+packages to install as one `pacman` line.
 
 ## Build from source
 

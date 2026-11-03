@@ -1,8 +1,9 @@
 #!/bin/sh
-# ferrite installer: downloads prebuilt ferrite tools from GitHub releases, checks their
-# SHA-256 and puts them in ~/.local/bin. No root needed. Re-run it to update.
+# ferrite installer (Arch Linux + Wayland): downloads prebuilt ferrite tools from GitHub
+# releases, checks their SHA-256 and puts them in ~/.local/bin. No root needed. Re-run it
+# to update.
 #
-#   curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- clipboard
+#   curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term
 #   sh install.sh [--dir DIR] [--version X.Y.Z] [--uninstall] TOOL...
 #
 # Everything runs inside main(), called on the last line: if the download is cut off,
@@ -11,9 +12,7 @@
 set -eu
 
 REPO="uhm26/ferrite"
-# Tools with prebuilt releases so far; the others: build from source (see README.md).
-PREBUILT="term files image video screenshot wallpaper clipboard"
-ALL_TOOLS="term files image video screenshot wallpaper clipboard"
+TOOLS="term files image video screenshot wallpaper clipboard"
 
 say() { printf 'ferrite: %s\n' "$*"; }
 die() { printf 'ferrite: error: %s\n' "$*" >&2; exit 1; }
@@ -21,7 +20,7 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
     cat <<EOF
-ferrite installer
+ferrite installer (Arch Linux + Wayland)
 
 usage: install.sh [options] TOOL...
 
@@ -31,8 +30,7 @@ options:
   --uninstall      remove the tools instead
   -h, --help       show this
 
-tools with prebuilt binaries: $PREBUILT
-all tools: $ALL_TOOLS
+tools: $TOOLS
 EOF
 }
 
@@ -51,30 +49,16 @@ fetch() {
     fi
 }
 
-sha256_of() {
-    if has sha256sum; then
-        sha256sum "$1" | cut -d' ' -f1
-    elif has shasum; then
-        shasum -a 256 "$1" | cut -d' ' -f1
-    else
-        die "needs sha256sum or shasum to check the download"
-    fi
-}
-
-# Release asset name for this machine, or fail with what to do instead.
-asset_of() {
-    case "$(uname -s)" in
-        Linux) ;;
-        *) die "ferrite is for Linux (with Wayland); this is $(uname -s)" ;;
+# ferrite supports Arch Linux and distros based on it (ID or ID_LIKE "arch"), x86_64.
+check_system() {
+    ids=$(grep -E '^(ID|ID_LIKE)=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '\n' ' ')
+    case " $ids " in
+        *" arch "*) ;;
+        *) die "ferrite supports Arch Linux (and Arch-based distros) only" ;;
     esac
     case "$(uname -m)" in
-        x86_64 | amd64) ;;
-        *) die "no prebuilt $1 for $(uname -m) yet; build it from source: https://github.com/$REPO#build-from-source" ;;
-    esac
-    # No system libraries: static musl build. The rest link system libraries (glibc build).
-    case "$1" in
-        clipboard | screenshot | wallpaper) printf '%s-x86_64-linux-musl' "$1" ;;
-        *) printf '%s-x86_64-linux-gnu' "$1" ;;
+        x86_64) ;;
+        *) die "no prebuilt tools for $(uname -m); build from source: https://github.com/$REPO#build-from-source" ;;
     esac
 }
 
@@ -90,24 +74,19 @@ latest_tag() {
 
 install_one() {
     tool=$1
-    case " $PREBUILT " in
+    case " $TOOLS " in
         *" $tool "*) ;;
-        *)
-            case " $ALL_TOOLS " in
-                *" $tool "*) die "$tool has no prebuilt binary yet; build it from source: https://github.com/$REPO#build-from-source" ;;
-                *) die "unknown tool '$tool' (tools: $ALL_TOOLS)" ;;
-            esac
-            ;;
+        *) die "unknown tool '$tool' (tools: $TOOLS)" ;;
     esac
-    asset=$(asset_of "$tool")
+    asset="$tool-x86_64-linux"
     if [ -n "$version" ]; then tag="$tool-v$version"; else tag=$(latest_tag "$tool"); fi
     base="https://github.com/$REPO/releases/download/$tag"
 
-    say "downloading $tag ($asset)"
+    say "downloading $tag"
     fetch "$base/$asset.tar.gz" "$tmp/$asset.tar.gz"
     fetch "$base/$asset.tar.gz.sha256" "$tmp/$asset.tar.gz.sha256"
     want=$(cut -d' ' -f1 "$tmp/$asset.tar.gz.sha256")
-    got=$(sha256_of "$tmp/$asset.tar.gz")
+    got=$(sha256sum "$tmp/$asset.tar.gz" | cut -d' ' -f1)
     [ "$want" = "$got" ] || die "checksum mismatch for $asset.tar.gz (corrupt or tampered download)"
 
     tar -xzf "$tmp/$asset.tar.gz" -C "$tmp"
@@ -118,8 +97,7 @@ install_one() {
     mv -f "$dir/.$tool.new" "$dir/$tool"
     say "installed $tool ${tag#"$tool"-v} to $dir/$tool"
     install_menu_entry "$tool" "$tmp/$asset"
-    check_libs "$dir/$tool"
-    check_programs "$tool"
+    missing_packages "$tool"
     notes_for "$tool"
 }
 
@@ -134,95 +112,42 @@ install_menu_entry() {
     say "added a menu entry: $data/applications/$1.desktop"
 }
 
-# arch, debian, fedora or other, from /etc/os-release (read, not sourced).
-distro_family() {
-    ids=$(grep -E '^(ID|ID_LIKE)=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '\n' ' ')
-    case " $ids " in
-        *" arch "*) echo arch ;;
-        *" debian "* | *" ubuntu "*) echo debian ;;
-        *" fedora "* | *" rhel "*) echo fedora ;;
-        *) echo other ;;
-    esac
-}
-
-# Package providing library $1 on distro family $2 (the library name if unknown).
-pkg_for() {
+# Arch package of a library or program the tools use.
+pkg_of() {
     case "$1" in
-        libfontconfig.so.1) a=fontconfig d=libfontconfig1 f=fontconfig ;;
-        libfreetype.so.6) a=freetype2 d=libfreetype6 f=freetype ;;
-        libxkbcommon.so.0) a=libxkbcommon d=libxkbcommon0 f=libxkbcommon ;;
-        librsvg-2.so.2) a=librsvg d=librsvg2-2 f=librsvg2 ;;
-        libcairo.so.2) a=cairo d=libcairo2 f=cairo ;;
-        libglib-2.0.so.0 | libgobject-2.0.so.0) a=glib2 d=libglib2.0-0 f=glib2 ;;
-        libwebpdemux.so.2) a=libwebp d=libwebpdemux2 f=libwebp ;;
-        libmpv.so.2) a=mpv d=libmpv2 f=mpv-libs ;;
-        libEGL.so.1) a=libglvnd d=libegl1 f=libglvnd-egl ;;
-        libgbm.so.1) a=mesa d=libgbm1 f=mesa-libgbm ;;
-        *) a=$1 d=$1 f=$1 ;;
-    esac
-    case "$2" in
-        arch) echo "$a" ;;
-        debian) echo "$d" ;;
-        fedora) echo "$f" ;;
+        libfontconfig.so.1) echo fontconfig ;;
+        libfreetype.so.6) echo freetype2 ;;
+        libxkbcommon.so.0) echo libxkbcommon ;;
+        librsvg-2.so.2) echo librsvg ;;
+        libcairo.so.2) echo cairo ;;
+        libglib-2.0.so.0 | libgobject-2.0.so.0) echo glib2 ;;
+        libwebpdemux.so.2) echo libwebp ;;
+        libmpv.so.2) echo mpv ;;
+        libEGL.so.1) echo libglvnd ;;
+        libgbm.so.1) echo mesa ;;
+        xdg-open) echo xdg-utils ;;
+        bsdtar) echo libarchive ;;
         *) echo "$1" ;;
     esac
 }
 
-# Programs tool $1 runs for some features: tell the user if they are missing.
-check_programs() {
+# One pacman line for everything tool $1 still needs: libraries it links (ldd) and
+# programs it runs (xdg-open to open files, bsdtar for archives).
+missing_packages() {
     case "$1" in
-        term) cmds="xdg-open" ;;
-        files) cmds="xdg-open bsdtar" ;;
-        *) return 0 ;;
+        term) progs="xdg-open" ;;
+        files) progs="xdg-open bsdtar" ;;
+        *) progs="" ;;
     esac
-    family=$(distro_family)
-    miss=""
+    need=$(ldd "$dir/$1" 2>/dev/null | awk '/not found/ {print $1}')
+    for p in $progs; do has "$p" || need="$need $p"; done
     pkgs=""
-    for c in $cmds; do
-        has "$c" && continue
-        miss="$miss $c"
-        case "$c:$family" in
-            xdg-open:*) p=xdg-utils ;;
-            bsdtar:arch) p=libarchive ;;
-            bsdtar:debian) p=libarchive-tools ;;
-            *) p=$c ;;
-        esac
-        pkgs="$pkgs $p"
-    done
-    [ -n "$miss" ] || return 0
-    say "missing programs:$miss (opening files with their app / archives need them)"
-    case "$family" in
-        arch) say "install them with: sudo pacman -S --needed$pkgs" ;;
-        debian) say "install them with: sudo apt install$pkgs" ;;
-        fedora) say "install them with: sudo dnf install$pkgs" ;;
-        *) say "install:$pkgs" ;;
-    esac
-}
-
-# Tell the user exactly what is missing for binary $1 to start (static ones need nothing).
-check_libs() {
-    has ldd || return 0
-    out=$(ldd "$1" 2>&1) || true
-    case "$out" in *"not a dynamic executable"* | *"statically linked"*) return 0 ;; esac
-    if printf '%s\n' "$out" | grep -q "GLIBC_.* not found"; then
-        say "warning: your system's glibc is older than this build needs; build from source instead: https://github.com/$REPO#build-from-source"
-        return 0
-    fi
-    missing=$(printf '%s\n' "$out" | awk '/not found/ {print $1}' | sort -u | tr '\n' ' ')
-    [ -n "$missing" ] || return 0
-    family=$(distro_family)
-    pkgs=""
-    for so in $missing; do
-        p=$(pkg_for "$so" "$family")
+    for n in $need; do
+        p=$(pkg_of "$n")
         case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac
     done
-    say "missing system libraries: $missing"
-    case "$family" in
-        arch) say "install them with: sudo pacman -S --needed$pkgs" ;;
-        debian) say "install them with: sudo apt install$pkgs" ;;
-        fedora) say "install them with: sudo dnf install$pkgs (mpv-libs comes from RPM Fusion)" ;;
-        *) say "install the packages that provide them ($pkgs ), then start $1 again" ;;
-    esac
+    [ -n "$pkgs" ] || return 0
+    say "$1 needs a few more packages: sudo pacman -S --needed$pkgs"
 }
 
 notes_for() {
@@ -271,7 +196,7 @@ main() {
         return 0
     fi
 
-    has tar || die "needs tar"
+    check_system
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
     for t in $tools; do install_one "$t"; done

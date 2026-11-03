@@ -21,7 +21,7 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, static, no root):
+Prebuilt for Arch Linux (x86_64), no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- screenshot
@@ -112,7 +112,7 @@ else `~/Pictures`.
 
 ## Requirements
 
-- Linux, glibc. Tested on x86_64.
+- Arch Linux (x86_64).
 - No system libraries beyond libc.
 - Wayland protocols:
 

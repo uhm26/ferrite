@@ -43,8 +43,8 @@
 
 ## Install
 
-Prebuilt (x86_64 Linux, glibc 2.35+, no root). The installer also adds a menu entry and tells
-you which system libraries are missing, if any:
+Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+one `pacman` line for anything still missing:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- files
@@ -213,7 +213,7 @@ Thumbnails are kept in memory only. Nothing is written to a cache folder.
   File System). Mounting internal disks needs a polkit rule, since `files` has no polkit
   agent to ask for a password.
 - xdg-desktop-portal and a D-Bus session bus for the file picker.
-- x86_64 with glibc (the few libc calls use x86_64 glibc struct layouts).
+- Arch Linux, x86_64 (the few libc calls use x86_64 glibc struct layouts).
 
 ## Limitations
 
