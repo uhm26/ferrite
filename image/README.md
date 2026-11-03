@@ -1,6 +1,6 @@
 # image
 
-> A small, fast image viewer for Wayland.
+Opens an image, zooms, and steps through the rest of the folder. PNG, JPEG, GIF, WebP and SVG.
 
 ![image](../assets/image.png)
 
@@ -17,6 +17,8 @@
 - Pan by dragging with the left mouse button. The picture can't be dragged off screen.
 - Browses the folder: step to the next or previous image, or jump to the first or last.
   The neighbors decode in the background, so stepping is instant.
+- Animations show their first frame at once and keep decoding while they play: a
+  3840x2160 GIF with 120 frames opens in about 0.12 s.
 - Rotates a quarter turn either way, with a short spin animation.
 - Copies the current image to the clipboard as PNG.
 - Moves the current file to the trash, in the standard FreeDesktop layout, so file
@@ -160,17 +162,16 @@ little slower. "Start" is from launch until the window is on screen.
 - Animated PNG (APNG) shows as a still image.
 - An SVG is rendered once, at the size of its window. Zooming in enlarges its pixels.
 - Transparent areas show on the window background color. There is no checkerboard.
-- Very long animations are cut off at about 1 GiB of decoded frames and loop early.
-  The process then uses about 1.7 GiB of memory.
-- A GIF shows only once all its frames are decoded: about 2.4 s for 120 frames at
-  1920x1080, 3.2 s at 3840x2160.
+- Long animations stop decoding at about 1 GiB of memory and loop early (a 1920x1080
+  GIF after about 97 frames, a 3840x2160 one after about 25).
 - The window's first size is capped at 1440x810, whatever your screen size. After that
   the window keeps its size when you step to other images.
 - Names sort as plain text, so `img10` comes before `img2`.
 - No HiDPI support: on a scaled output the compositor stretches the window.
 - The window draws no title bar of its own. On compositors that expect apps to draw
   one (such as GNOME), it has none.
-- Up to three decoded images stay in memory (the current one and its neighbors).
+- Besides the current image, each neighbor holds up to 5 decoded frames, and the one you
+  just left stays decoded for stepping back if it takes under 256 MB.
 
 ## License
 

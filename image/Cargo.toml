@@ -11,3 +11,6 @@ pix = { path = "../pix" } # our image decode + resample (same repo)
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+gif = { version = "0.13.3", default-features = false, features = ["std"] } # tests write animated GIFs (already in the tree via pix)

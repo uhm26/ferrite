@@ -14,8 +14,10 @@ use zune_core::options::DecoderOptions;
 #[cfg(feature = "svg")]
 use crate::svg::Svg;
 
-/// All frames of one animation together stay under this (RGB bytes; 16 GB machine).
-pub(crate) const MAX_FRAME_BYTES: usize = 1 << 30;
+/// All frames of one animation together stay under this many RGB bytes. Measured in
+/// `image` (a mip chain per frame, +⅓, plus allocator slack): the process holds about
+/// 1.8× this, so about 1 GiB.
+pub(crate) const MAX_FRAME_BYTES: usize = 576 << 20;
 
 #[derive(Debug)]
 pub enum Error {
@@ -61,33 +63,65 @@ pub(crate) fn delay_ms(ms: u32) -> u32 {
     if ms <= 10 { 100 } else { ms }
 }
 
+/// Where decoded frames go, one at a time; it returns false to stop decoding.
+pub type Each<'a> = &'a mut dyn FnMut(Frame) -> bool;
+
 /// Open any supported file. `bg`: the color transparent pixels are blended onto.
 pub fn open(path: &Path, bg: [u8; 3]) -> Result<Image, Error> {
-    let bytes = std::fs::read(path).map_err(Error::Read)?;
-    let still = |img| Image::Frames(vec![Frame { img, ms: 0 }]);
-    if bytes.starts_with(b"\x89PNG") {
-        png(&bytes, bg).map(still)
-    } else if bytes.starts_with(&[0xff, 0xd8]) {
-        jpeg(&bytes, bg).map(still)
-    } else if bytes.starts_with(b"GIF8") {
-        crate::gif::frames(&bytes, bg).map(Image::Frames)
-    } else {
-        open_optional(bytes, bg)
+    let mut all = Vec::new();
+    match open_each(path, bg, &mut |f| {
+        all.push(f);
+        true
+    })? {
+        Image::Frames(_) => Ok(Image::Frames(all)),
+        #[cfg(feature = "svg")]
+        svg => Ok(svg),
     }
 }
 
+/// Like [`open`], but pixel frames go to `each` as soon as each one is decoded (a long
+/// animation shows its first frame at once) and come back as `Image::Frames(vec![])`.
+/// An SVG comes back as the document. Errors only if no frame decoded.
+pub fn open_each(path: &Path, bg: [u8; 3], each: Each) -> Result<Image, Error> {
+    let bytes = std::fs::read(path).map_err(Error::Read)?;
+    let mut still = |img| {
+        each(Frame { img, ms: 0 });
+    };
+    if bytes.starts_with(b"\x89PNG") {
+        png(&bytes, bg).map(&mut still)?;
+    } else if bytes.starts_with(&[0xff, 0xd8]) {
+        jpeg(&bytes, bg).map(&mut still)?;
+    } else if bytes.starts_with(b"GIF8") {
+        crate::gif::frames(&bytes, bg, each)?;
+    } else {
+        return open_optional(bytes, bg, each);
+    }
+    Ok(Image::Frames(Vec::new()))
+}
+
 /// Formats behind features (they link big system libraries). Off → `Error::Format`.
-fn open_optional(bytes: Vec<u8>, bg: [u8; 3]) -> Result<Image, Error> {
+fn open_optional(bytes: Vec<u8>, bg: [u8; 3], each: Each) -> Result<Image, Error> {
     #[cfg(feature = "webp")]
     if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
-        return crate::webp::frames(&bytes, bg).map(Image::Frames);
+        return crate::webp::frames(&bytes, bg, each).map(|()| Image::Frames(Vec::new()));
     }
     #[cfg(feature = "svg")]
     if is_svg(&bytes) {
         return Svg::new(&bytes).map(Image::Svg);
     }
-    let _ = (bytes, bg); // used only by the optional formats
+    let _ = (bytes, bg, each); // used only by the optional formats
     Err(Error::Format)
+}
+
+/// Every frame a decoder hands out, in a Vec (for tests).
+#[cfg(test)]
+pub(crate) fn collect(run: impl FnOnce(Each) -> Result<(), Error>) -> Result<Vec<Frame>, Error> {
+    let mut all = Vec::new();
+    run(&mut |f| {
+        all.push(f);
+        true
+    })?;
+    Ok(all)
 }
 
 /// XML text with an `<svg` tag near the start (after any `<?xml`, comments, doctype).
@@ -98,10 +132,15 @@ fn is_svg(bytes: &[u8]) -> bool {
     text.trim_ascii_start().starts_with(b"<") && text.windows(4).any(|w| w == b"<svg")
 }
 
-/// The first frame as pixels; an SVG rendered at its own size.
+/// The first frame as pixels (the rest of an animation is never decoded); an SVG
+/// rendered at its own size.
 pub fn load(path: &Path, bg: [u8; 3]) -> Result<Rgb, Error> {
-    match open(path, bg)? {
-        Image::Frames(mut f) => Ok(f.swap_remove(0).img),
+    let mut first = None;
+    match open_each(path, bg, &mut |f| {
+        first = Some(f.img);
+        false
+    })? {
+        Image::Frames(_) => first.ok_or_else(|| Error::Decode("no frames".into())),
         #[cfg(feature = "svg")]
         Image::Svg(s) => {
             let (w, h) = s.size();

@@ -1,12 +1,12 @@
 # pix
 
-> The image library ferrite's tools share: decode PNG, JPEG, GIF, WebP and SVG, then scale the result into ARGB buffers ready to show.
+The image library ferrite's tools share: decode PNG, JPEG, GIF, WebP and SVG, then scale the result into ARGB buffers ready to show.
 
 ## What's inside
 
 | Module | What it does |
 |---|---|
-| `decode` | `open` and `load`: sniff the format from the first bytes and decode to packed 8-bit RGB (`Rgb`), blending transparency onto a background color you pass. `open` returns every frame of an animation (`Image::Frames`) or an SVG document (`Image::Svg`); `load` returns just the first frame. PNG and JPEG use the zune decoders. |
+| `decode` | `open` and `load`: sniff the format from the first bytes and decode to packed 8-bit RGB (`Rgb`), blending transparency onto a background color you pass. `open` returns every frame of an animation (`Image::Frames`) or an SVG document (`Image::Svg`); `load` returns just the first frame (the rest of an animation is never decoded); `open_each` hands frames to a callback one at a time, so a viewer can show the first while the rest decode. PNG and JPEG use the zune decoders. |
 | `gif` | Still and animated GIF through the `gif` crate, composited into whole frames. |
 | `webp` | Still and animated WebP through the system libwebp (feature `webp`). |
 | `svg` | `Svg`: keeps the document and renders it at any size through the system librsvg (feature `svg`). |

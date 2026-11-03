@@ -4,9 +4,10 @@
 use gif::{ColorOutput, DecodeOptions, DisposalMethod};
 use zune_core::colorspace::ColorSpace;
 
-use crate::decode::{Error, Frame, MAX_FRAME_BYTES, delay_ms, to_rgb};
+use crate::decode::{Each, Error, Frame, MAX_FRAME_BYTES, delay_ms, to_rgb};
 
-pub fn frames(bytes: &[u8], bg: [u8; 3]) -> Result<Vec<Frame>, Error> {
+/// Hands every frame to `each` as it is decoded.
+pub fn frames(bytes: &[u8], bg: [u8; 3], each: Each) -> Result<(), Error> {
     let err = |e: gif::DecodingError| Error::Decode(format!("GIF: {e}"));
     let mut o = DecodeOptions::new();
     o.set_color_output(ColorOutput::RGBA);
@@ -16,33 +17,34 @@ pub fn frames(bytes: &[u8], bg: [u8; 3]) -> Result<Vec<Frame>, Error> {
         return Err(Error::Decode("GIF: empty canvas".into()));
     }
     let mut canvas = vec![0u8; w * h * 4];
-    let mut out = Vec::new();
+    let mut n = 0;
     // shortcut: frames past MAX_FRAME_BYTES are dropped (the animation loops early).
-    while out.len() * w * h * 3 < MAX_FRAME_BYTES {
+    while n * w * h * 3 < MAX_FRAME_BYTES {
         let f = match d.read_next_frame() {
             Ok(Some(f)) => f,
             Ok(None) => break,
-            Err(_) if !out.is_empty() => break, // truncated file: keep what decoded
+            Err(_) if n > 0 => break, // truncated file: keep what decoded
             Err(e) => return Err(err(e)),
         };
         let rect = Rect::of(f, (w, h));
         let before = (f.dispose == DisposalMethod::Previous).then(|| canvas.clone());
         rect.draw(&mut canvas, w, &f.buffer);
         let img = to_rgb(canvas.clone(), (w, h), ColorSpace::RGBA, bg)?;
-        out.push(Frame {
-            img,
-            ms: delay_ms(u32::from(f.delay) * 10),
-        });
+        let ms = delay_ms(u32::from(f.delay) * 10);
+        n += 1;
+        if !each(Frame { img, ms }) {
+            return Ok(());
+        }
         match (f.dispose, before) {
             (DisposalMethod::Background, _) => rect.clear(&mut canvas, w),
             (DisposalMethod::Previous, Some(b)) => canvas = b,
             _ => {}
         }
     }
-    if out.is_empty() {
+    if n == 0 {
         return Err(Error::Decode("GIF: no frames".into()));
     }
-    Ok(out)
+    Ok(())
 }
 
 /// A frame's sub-rectangle, clipped to the canvas.
@@ -111,10 +113,21 @@ mod tests {
 
     #[test]
     fn frames_are_composited_and_disposed() {
-        let f = frames(&two_frames(), [9, 9, 9]).unwrap();
+        let f = crate::decode::collect(|e| frames(&two_frames(), [9, 9, 9], e)).unwrap();
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].img.px, [255, 0, 0, 9, 9, 9]);
         assert_eq!(f[1].img.px, [9, 9, 9, 0, 255, 0]); // red cleared by its disposal
         assert_eq!(f[0].ms, 50);
+    }
+
+    #[test]
+    fn stops_when_told() {
+        let mut seen = 0;
+        frames(&two_frames(), [0; 3], &mut |_| {
+            seen += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(seen, 1);
     }
 }

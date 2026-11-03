@@ -31,7 +31,7 @@ mod sys;
 #[cfg(feature = "webp")]
 mod webp;
 
-pub use decode::{Error, Frame, Image, Rgb, load, open};
+pub use decode::{Each, Error, Frame, Image, Rgb, load, open, open_each};
 pub use mip::Mip;
 pub use encode::png;
 pub use orient::{CCW, CW, orient};

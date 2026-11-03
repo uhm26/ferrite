@@ -13,15 +13,20 @@ use frame::ui::theme::{BODY, SUB, WINDOW};
 use frame::window::Canvas;
 use pix::Mip;
 
-use crate::load::{Loaded, Near};
+use crate::load::{Near, Stream};
 use crate::view::View;
 use crate::{folder, trash};
+
+/// How long to hold a frame when the next one is still decoding.
+const DECODE_WAIT: Duration = Duration::from_millis(16);
 
 pub struct Show {
     text: Text,
     list: Vec<PathBuf>,
     at: usize,
-    pub img: Loaded,
+    img: Stream,
+    /// Quarter turns clockwise so far, for frames that are still on their way.
+    turns: u8,
     /// The neighbors, decoding or decoded.
     near: Near,
     frame: usize,
@@ -39,7 +44,8 @@ impl Show {
             text: Text::new(frame::ui::theme::FAMILY)?,
             list,
             at,
-            img: Err(String::new()),
+            img: Stream::ready(Err(String::new())),
+            turns: 0,
             near: Near::default(),
             frame: 0,
             due: None,
@@ -52,13 +58,13 @@ impl Show {
 
     /// Show image `at`; `leaving` (the image shown until now) stays decoded nearby.
     fn load(&mut self, leaving: Option<PathBuf>) {
-        let old = std::mem::replace(&mut self.img, Err(String::new()));
+        let old = std::mem::replace(&mut self.img, Stream::ready(Err(String::new())));
         if let Some(p) = leaving {
             self.near.keep(p, old);
         }
         self.img = match self.list.get(self.at) {
             Some(p) => self.near.take(p),
-            None => Err("no images here".into()),
+            None => Stream::ready(Err("no images here".into())),
         };
         let at = self.at;
         let want: Vec<&Path> = [at.wrapping_sub(1), at + 1]
@@ -74,15 +80,17 @@ impl Show {
         self.view = View::new();
         self.note.clear();
         self.frame = 0;
-        self.due = match &self.img {
-            Ok(f) if f.len() > 1 => Some(Instant::now() + Duration::from_millis(f[0].1.into())),
+        self.turns = 0;
+        // Stills have 0 ms; an animation may still be arriving, so one frame is enough.
+        self.due = match &self.img.got {
+            Ok(f) if f[0].1 > 0 => Some(Instant::now() + Duration::from_millis(f[0].1.into())),
             _ => None,
         };
     }
 
     /// The frame on screen.
     fn current(&self) -> Result<&Mip, &str> {
-        match &self.img {
+        match &self.img.got {
             Ok(f) => Ok(&f[self.frame].0),
             Err(e) => Err(e),
         }
@@ -95,17 +103,40 @@ impl Show {
 
     /// Show the next animation frame if it is due at `now`. True if it changed.
     pub fn tick(&mut self, now: Instant) -> bool {
-        let (Some(due), Ok(f)) = (self.due, &self.img) else {
+        let Some(due) = self.due.filter(|&d| now >= d) else {
             return false;
         };
-        if now < due {
+        self.pull();
+        let done = self.img.done();
+        let Ok(f) = &self.img.got else {
+            return false;
+        };
+        if self.frame + 1 < f.len() {
+            self.frame += 1;
+        } else if done && f.len() > 1 {
+            self.frame = 0;
+        } else {
+            // The decoder is behind: hold this frame and look again. Done with one frame: a still.
+            self.due = (!done).then(|| now + DECODE_WAIT);
             return false;
         }
-        self.frame = (self.frame + 1) % f.len();
         let next = due + Duration::from_millis(f[self.frame].1.into());
         // After a stall (hidden window, slow frame) restart the clock, don't race to catch up.
         self.due = Some(if next < now { now } else { next });
         true
+    }
+
+    /// Take the frames that arrived from the decoder, turned like the ones shown.
+    fn pull(&mut self) {
+        let had = self.img.got.as_ref().map_or(0, Vec::len);
+        self.img.pull();
+        if let Ok(f) = &mut self.img.got {
+            for (m, _) in &mut f[had..] {
+                for _ in 0..self.turns {
+                    *m = Mip::new(pix::orient(m.full(), pix::CW));
+                }
+            }
+        }
     }
 
     /// Move `by` images, stopping at the ends (`isize::MAX` = to the end).
@@ -125,12 +156,13 @@ impl Show {
     /// Turn every frame by EXIF orientation `o` ([`pix::CW`], [`pix::CCW`]), back to
     /// fit. Only in memory: the file is never touched. True if there was an image.
     pub fn rotate(&mut self, o: u8) -> bool {
-        let Ok(f) = &mut self.img else {
+        let Ok(f) = &mut self.img.got else {
             return false;
         };
         for (m, _) in f.iter_mut() {
             *m = Mip::new(pix::orient(m.full(), o));
         }
+        self.turns = (self.turns + if o == pix::CW { 1 } else { 3 }) % 4;
         // Spin from wherever the picture shows now (a second r mid-turn adds on).
         let quarter = if o == pix::CW { 90.0 } else { -90.0 };
         self.view = View::new().turned(quarter - self.view.turn_left());
@@ -186,7 +218,7 @@ impl Show {
     pub fn paint(&mut self, c: Canvas) {
         let (w, h) = (c.w, c.h);
         let frame = self.frame;
-        match &self.img {
+        match &self.img.got {
             Ok(f) => self.view.paint(&f[frame].0, (c.px, w, h)),
             Err(e) => {
                 let mut p = Painter::new(c);

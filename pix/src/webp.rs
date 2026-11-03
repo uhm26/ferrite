@@ -4,7 +4,7 @@
 
 use std::ffi::c_int;
 
-use crate::decode::{Error, Frame, MAX_FRAME_BYTES, delay_ms, to_rgb};
+use crate::decode::{Each, Error, Frame, MAX_FRAME_BYTES, delay_ms, to_rgb};
 use crate::sys::webp::*;
 use zune_core::colorspace::ColorSpace;
 
@@ -18,7 +18,8 @@ impl Drop for Decoder<'_> {
     }
 }
 
-pub fn frames(bytes: &[u8], bg: [u8; 3]) -> Result<Vec<Frame>, Error> {
+/// Hands every frame to `each` as it is decoded.
+pub fn frames(bytes: &[u8], bg: [u8; 3], each: Each) -> Result<(), Error> {
     let bad = || Error::Decode("bad WebP".into());
     let mut opts = WebPAnimDecoderOptions::default();
     // SAFETY: `opts` is a valid, writable options struct of the header's layout.
@@ -45,10 +46,10 @@ pub fn frames(bytes: &[u8], bg: [u8; 3]) -> Result<Vec<Frame>, Error> {
     if w == 0 || h == 0 {
         return Err(bad());
     }
-    let mut out = Vec::new();
+    let mut n = 0;
     let (mut buf, mut ts, mut prev): (*mut u8, c_int, c_int) = (std::ptr::null_mut(), 0, 0);
     // shortcut: frames past MAX_FRAME_BYTES are dropped (the animation loops early).
-    while out.len() * w * h * 3 < MAX_FRAME_BYTES
+    while n * w * h * 3 < MAX_FRAME_BYTES
         // SAFETY: live decoder, writable out-params; on success `buf` holds w*h*4 bytes
         // valid until the next call, and we copy them out before that.
         && unsafe { WebPAnimDecoderGetNext(dec.0, &mut buf, &mut ts) } != 0
@@ -57,12 +58,13 @@ pub fn frames(bytes: &[u8], bg: [u8; 3]) -> Result<Vec<Frame>, Error> {
         let rgba = unsafe { std::slice::from_raw_parts(buf, w * h * 4) }.to_vec();
         let ms = (ts - prev).max(0) as u32;
         prev = ts;
-        out.push(Frame {
-            img: to_rgb(rgba, (w, h), ColorSpace::RGBA, bg)?,
-            ms: delay_ms(ms),
-        });
+        let img = to_rgb(rgba, (w, h), ColorSpace::RGBA, bg)?;
+        n += 1;
+        if !each(Frame { img, ms: delay_ms(ms) }) {
+            break;
+        }
     }
-    if out.is_empty() { Err(bad()) } else { Ok(out) }
+    if n == 0 { Err(bad()) } else { Ok(()) }
 }
 
 #[cfg(test)]
@@ -76,8 +78,8 @@ mod tests {
             82, 73, 70, 70, 26, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 76, 13, 0, 0, 0, 47, 0, 0, 0,
             16, 7, 16, 17, 17, 136, 136, 254, 7, 0,
         ];
-        let f = frames(&one, [9, 9, 9]).unwrap();
+        let f = crate::decode::collect(|e| frames(&one, [9, 9, 9], e)).unwrap();
         assert_eq!((f.len(), f[0].img.w, f[0].img.h, f[0].ms), (1, 1, 1, 100));
-        assert!(frames(b"RIFF\0\0\0\0WEBPjunk", [0; 3]).is_err());
+        assert!(frames(b"RIFF\0\0\0\0WEBPjunk", [0; 3], &mut |_| true).is_err());
     }
 }
