@@ -481,22 +481,29 @@ impl View {
             self.note = Some("Nothing to undo".into());
             return;
         };
-        match u {
-            Undo::Moved(pairs) => self.run(Op::MoveBack(pairs)),
-            Undo::Made(paths) => self.run(Op::Trash(paths)),
-            Undo::Trashed(names) => self.run(Op::Restore(names)),
-            Undo::Renamed(old, new) => match std::fs::rename(&new, &old) {
-                Ok(()) => {
-                    self.note = Some(format!(
-                        "Undone: renamed back to \u{201c}{}\u{201d}",
-                        name(&old)
-                    ));
-                    if let Some(n) = old.file_name() {
-                        b.reload_select(n);
+        let job = match u {
+            Undo::Moved(pairs) => Op::MoveBack(pairs),
+            Undo::Made(paths) => Op::Trash(paths),
+            Undo::Trashed(names) => Op::Restore(names),
+            Undo::Renamed(old, new) => {
+                match std::fs::rename(&new, &old) {
+                    Ok(()) => {
+                        self.note = Some(format!(
+                            "Undone: renamed back to \u{201c}{}\u{201d}",
+                            name(&old)
+                        ));
+                        if let Some(n) = old.file_name() {
+                            b.reload_select(n);
+                        }
                     }
+                    Err(e) => self.note = Some(format!("Error: {e}")),
                 }
-                Err(e) => self.note = Some(format!("Error: {e}")),
-            },
+                return;
+            }
+        };
+        // Not `run`: the undo's own job must not become the next Ctrl+Z step.
+        if let Err(e) = self.jobs.start_undo(job) {
+            self.note = Some(format!("Error: {e}"));
         }
     }
 }

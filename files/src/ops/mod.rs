@@ -99,6 +99,16 @@ impl Jobs {
 
     /// Run `op` on a worker thread.
     pub fn start(&mut self, op: Op) -> io::Result<()> {
+        self.start_with(op, true)
+    }
+
+    /// A job Ctrl+Z started: its own report must not become the next undo step, or
+    /// Ctrl+Z would flip between undoing and redoing the same change.
+    pub fn start_undo(&mut self, op: Op) -> io::Result<()> {
+        self.start_with(op, false)
+    }
+
+    fn start_with(&mut self, op: Op, keep_undo: bool) -> io::Result<()> {
         let mut wake = self.wake_w.try_clone()?;
         let tx = self.tx.clone();
         let prog = Arc::new(Progress::default());
@@ -107,7 +117,13 @@ impl Jobs {
         }
         self.running += 1;
         std::thread::spawn(move || {
-            let _ = tx.send(run(op, &prog));
+            let mut report = run(op, &prog);
+            if let Report::Done { undo, .. } = &mut report
+                && !keep_undo
+            {
+                *undo = None;
+            }
+            let _ = tx.send(report);
             drop(prog); // before waking: the window sees this job as finished
             let _ = wake.write_all(&[1]);
         });
@@ -214,7 +230,10 @@ fn run_trash_and_archives(op: Op) -> Report {
         }
         Op::MoveBack(pairs) => {
             let back = |(from, to): &(PathBuf, PathBuf)| {
-                (name_of(from), copy::move_back(to, from).map(|()| Some(from.clone())))
+                (
+                    name_of(from),
+                    copy::move_back(to, from).map(|()| Some(from.clone())),
+                )
             };
             // Say where it went: the folder may not be on screen (owner: it "disappeared").
             let home = crate::view::home();
@@ -364,6 +383,37 @@ mod tests {
         let back = d.join("a.txt").exists();
         fs::remove_dir_all(&d).unwrap();
         assert!(back);
-        assert_eq!(line, format!("Undone: moved back \u{201c}a.txt\u{201d} to {}", d.display()));
+        assert_eq!(
+            line,
+            format!(
+                "Undone: moved back \u{201c}a.txt\u{201d} to {}",
+                d.display()
+            )
+        );
+    }
+
+    #[test]
+    fn an_undo_job_leaves_no_undo_step() {
+        let d = std::env::temp_dir().join(format!("files-undo-job-{}", std::process::id()));
+        fs::create_dir_all(d.join("into")).unwrap();
+        fs::write(d.join("into/a.txt"), "x").unwrap();
+        let mut jobs = Jobs::new().unwrap();
+        jobs.start_undo(Op::MoveBack(vec![(d.join("a.txt"), d.join("into/a.txt"))]))
+            .unwrap();
+        let mut got = Vec::new();
+        for _ in 0..200 {
+            got = jobs.reports();
+            if !got.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let back = d.join("a.txt").exists();
+        fs::remove_dir_all(&d).unwrap();
+        assert!(back, "the undo job still runs");
+        let Some(Report::Done { undo, .. }) = got.pop() else {
+            panic!("no report")
+        };
+        assert_eq!(undo, None, "Ctrl+Z must not get a redo step");
     }
 }
