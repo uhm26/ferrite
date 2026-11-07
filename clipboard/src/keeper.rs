@@ -4,7 +4,7 @@
 use std::io;
 use std::os::fd::AsFd;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::pipes::{Kept, Reader, STALL, Writer};
 use crate::sys::{self, POLLIN, POLLOUT, PollFd};
@@ -28,6 +28,10 @@ const SECRET: &str = "x-kde-passwordManagerHint";
 /// Pastes served at once; past this the oldest (likely stuck) one is dropped.
 /// Each costs one fd (the data is shared), and the soft fd limit is 1024.
 const MAX_WRITERS: usize = 256;
+/// How long the selection must stay empty before we take over. Apps that replace
+/// their copy destroy the old source first (empty for a moment), then set the new
+/// one; taking over at once raced that and wiped the fresh copy.
+const GRACE: Duration = Duration::from_millis(100);
 
 /// What one data offer advertises, as far as we care.
 #[derive(Debug)]
@@ -88,8 +92,8 @@ pub struct Keeper {
     data: Vec<(String, Rc<Kept>)>,
     /// Our live source while we own the selection.
     source: Option<u32>,
-    /// The selection is currently empty.
-    empty: bool,
+    /// Since when the selection is empty; None = something owns it.
+    empty_since: Option<Instant>,
     /// Parts of the last copy still coming in: (type asked for, reader).
     readers: Vec<(String, Reader)>,
     writers: Vec<Writer>,
@@ -103,7 +107,7 @@ impl Keeper {
             offers: Vec::new(),
             data: Vec::new(),
             source: None,
-            empty: false,
+            empty_since: None,
             readers: Vec::new(),
             writers: Vec::new(),
         }
@@ -157,12 +161,17 @@ impl Keeper {
         Ok(())
     }
 
-    /// How long poll may sleep: forever, unless a copy is still coming in.
+    /// How long poll may sleep: forever, unless a copy is still coming in or the
+    /// grace before a take-over is running.
     pub fn timeout_ms(&self) -> i32 {
-        let Some(next) = self.readers.iter().map(|(_, r)| r.deadline()).min() else {
+        let now = Instant::now();
+        // A passed grace deadline is left out, or poll would spin while we wait on a reader.
+        let grace = self.empty_since.map(|t| t + GRACE).filter(|d| *d > now);
+        let readers = self.readers.iter().map(|(_, r)| r.deadline());
+        let Some(next) = readers.chain(grace).min() else {
             return -1;
         };
-        let left = next.saturating_duration_since(Instant::now()).as_millis();
+        let left = next.saturating_duration_since(now).as_millis();
         i32::try_from(left).unwrap_or(i32::MAX).saturating_add(1) // wake just after it
     }
 
@@ -210,10 +219,11 @@ impl Keeper {
     }
 
     fn selection(&mut self, conn: &mut Conn, id: u32) -> Result<(), Error> {
-        self.empty = id == 0;
-        if self.empty {
-            return self.take_over(conn);
+        if id == 0 {
+            self.empty_since = Some(Instant::now()); // pump takes over after GRACE
+            return Ok(());
         }
+        self.empty_since = None;
         let Some(offer) = self.take_offer(id) else {
             return Ok(());
         };
@@ -237,10 +247,11 @@ impl Keeper {
         Some(self.offers.swap_remove(i))
     }
 
-    /// Own the selection with the kept copy, if it is empty and we have one.
+    /// Own the selection with the kept copy, if it has been empty for GRACE.
     fn take_over(&mut self, conn: &mut Conn) -> Result<(), Error> {
         let busy = self.source.is_some() || !self.readers.is_empty();
-        if !self.empty || busy || self.data.is_empty() {
+        let settled = self.empty_since.is_some_and(|t| t.elapsed() >= GRACE);
+        if !settled || busy || self.data.is_empty() {
             return Ok(());
         }
         let id = conn.new_id();
@@ -250,7 +261,7 @@ impl Keeper {
         }
         conn.send(self.device, device::SET_SELECTION, &[Arg::U(id)])?;
         self.source = Some(id);
-        self.empty = false; // until the compositor says so; a stale true would re-take
+        self.empty_since = None; // until the compositor says so; stale would re-take
         Ok(())
     }
 
@@ -328,5 +339,15 @@ mod tests {
         k.readers.push((PNG.into(), Reader::new(r).unwrap()));
         let ms = k.timeout_ms();
         assert!(ms > 9_000 && ms <= STALL.as_millis() as i32 + 1, "{ms}");
+    }
+
+    #[test]
+    fn wakes_once_when_the_grace_ends_then_sleeps() {
+        let mut k = Keeper::new(2, 3);
+        k.empty_since = Some(Instant::now());
+        let ms = k.timeout_ms();
+        assert!(ms > 50 && ms <= GRACE.as_millis() as i32 + 1, "{ms}");
+        k.empty_since = Some(Instant::now() - GRACE); // grace over, nothing to wait for
+        assert_eq!(k.timeout_ms(), -1);
     }
 }
