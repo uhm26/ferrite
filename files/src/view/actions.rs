@@ -187,7 +187,10 @@ impl View {
             Action::Bookmark => {
                 self.bookmark(paths.first().cloned().unwrap_or_else(|| b.cwd.clone()))
             }
-            Action::Hidden => b.toggle_hidden(),
+            Action::Hidden => {
+                b.toggle_hidden();
+                crate::browse::saved::set_hidden(b.hidden);
+            }
             Action::Info => self.info_open = !self.info_open,
             Action::Terminal => {
                 let into = cursor.filter(|c| c.1).map(|c| b.cwd.join(c.0));

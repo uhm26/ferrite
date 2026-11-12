@@ -1,8 +1,10 @@
 //! Where we are: the current folder, its entries, the selected one, back/forward
 //! history, and moving between folders (tabs.rs: several at once; search.rs: names
-//! found in all subfolders; recent.rs: recent files). No drawing here.
+//! found in all subfolders; recent.rs: recent files; saved.rs: settings kept between
+//! runs). No drawing here.
 
 pub mod recent;
+pub mod saved;
 pub mod search;
 pub mod tabs;
 
@@ -49,6 +51,11 @@ impl Browser {
     /// Open on `cwd`; if it can't be read, on home, then `/` (the error stays shown).
     pub fn new(cwd: PathBuf) -> Self {
         Self::with(cwd, false, (SortBy::Name, false))
+    }
+
+    /// The first tab of a run: hidden files shown as the last run left them.
+    pub fn first(cwd: PathBuf) -> Self {
+        Self::with(cwd, saved::hidden(), (SortBy::Name, false))
     }
 
     /// Open on `cwd` with `like`'s view settings (hidden files, sort): a new tab.

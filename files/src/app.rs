@@ -116,7 +116,7 @@ impl App {
             ui: State::new(Text::new(theme::FAMILY)?),
             view: View::new()?,
             // A folder we can't resolve still opens: Browser falls back and shows why.
-            tabs: Tabs::new(Browser::new(std::fs::canonicalize(&start).unwrap_or(start))),
+            tabs: Tabs::new(Browser::first(std::fs::canonicalize(&start).unwrap_or(start))),
             last: Instant::now(),
             titled: PathBuf::new(),
             watch: None,
