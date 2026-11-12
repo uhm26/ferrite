@@ -150,17 +150,18 @@ pkg_of_arch() {
         libgbm.so.1) echo mesa ;;
         xdg-open) echo xdg-utils ;;
         bsdtar) echo libarchive ;;
+        udisksctl) echo udisks2 ;;
         pkexec) echo polkit ;;
         *) echo "$1" ;;
     esac
 }
 
 # One pacman/dnf line for everything tool $1 still needs: libraries it links (ldd) and
-# programs it runs (xdg-open to open files, bsdtar for archives).
+# programs it runs (xdg-open to open files, bsdtar for archives, udisks2 for drives).
 missing_packages() {
     case "$1" in
         term) progs="xdg-open" ;;
-        files) progs="xdg-open bsdtar" ;;
+        files) progs="xdg-open bsdtar udisksctl" ;; # udisksctl: the udisks2 drive service is there
         auth) progs="pkexec" ;;
         *) progs="" ;;
     esac
