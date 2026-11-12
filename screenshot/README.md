@@ -22,7 +22,7 @@ window.
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root:
+Prebuilt for Arch Linux and Fedora (x86_64), no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- screenshot
@@ -129,7 +129,7 @@ little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 
-- Arch Linux (x86_64).
+- Arch Linux or Fedora (x86_64).
 - No system libraries beyond libc.
 - Wayland protocols:
 

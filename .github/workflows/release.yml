@@ -1,6 +1,8 @@
 # Release one tool: push a tag `<tool>-v<version>` (e.g. clipboard-v0.2.0). This tests it,
-# builds it in a clean Arch Linux container (ferrite supports Arch only) and publishes
-# `<tool>-x86_64-linux.tar.gz` + `.sha256` as a GitHub release that install.sh downloads.
+# builds it in a clean Fedora container and publishes `<tool>-x86_64-linux.tar.gz` +
+# `.sha256` as a GitHub release that install.sh downloads. One binary serves Arch and Fedora:
+# it is built against the oldest glibc of the two (Fedora's oldest supported release; Arch is
+# rolling and always newer).
 name: release
 
 on:
@@ -13,15 +15,17 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    # shortcut: pinned to the oldest supported Fedora, bump it when that release reaches end of life.
+    container: fedora:43
     steps:
-      - name: Arch packages
+      - name: Fedora packages
         # Build deps of every tool (fontconfig/freetype/xkbcommon: frame; librsvg/cairo/glib/
-        # libwebp: pix; mpv/mesa/libglvnd: video; libarchive: files' archive test).
+        # libwebp: pix; mpv/mesa/libglvnd: video; bsdtar: files' archive test).
         run: |
-          pacman -Syu --noconfirm --needed base-devel rust git github-cli \
-            fontconfig freetype2 libxkbcommon librsvg cairo glib2 libwebp \
-            mpv mesa libglvnd libarchive adwaita-fonts dbus
+          dnf install -y --setopt=install_weak_deps=False gcc rust cargo git gh tar gzip \
+            fontconfig-devel freetype-devel libxkbcommon-devel librsvg2-devel cairo-devel \
+            glib2-devel libwebp-devel mpv-devel mesa-libgbm-devel libglvnd-devel bsdtar \
+            adwaita-sans-fonts adwaita-mono-fonts dbus-daemon dbus-tools
 
       - uses: actions/checkout@v5
 

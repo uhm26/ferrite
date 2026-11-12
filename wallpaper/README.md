@@ -22,7 +22,7 @@ another image to switch.
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root:
+Prebuilt for Arch Linux and Fedora (x86_64), no root:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- wallpaper
@@ -119,7 +119,7 @@ little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 
-- Arch Linux (x86_64).
+- Arch Linux or Fedora (x86_64).
 - No system libraries beyond libc.
 - Wayland protocols: `wl_compositor` (version 4), `wl_shm`, `wl_output` (version 2 or
   newer), and `zwlr_layer_shell_v1`.

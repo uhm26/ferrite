@@ -21,7 +21,7 @@ app needs more rights, such as mounting an internal disk in a file manager or `p
 
 ## Requirements
 
-polkit 126 or newer with `polkit-agent-helper.socket` (Arch's polkit has it), a Wayland
+polkit 126 or newer with `polkit-agent-helper.socket` (Arch's and Fedora's polkit ship it), a Wayland
 compositor, and `XDG_SESSION_ID` set in the environment (logind sets it at login).
 
 ## License

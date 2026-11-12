@@ -30,7 +30,7 @@ Opens an image, zooms, and steps through the rest of the folder. PNG, JPEG, GIF,
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+Prebuilt for Arch Linux and Fedora (x86_64), no root. The installer also adds a menu entry and prints
 one `pacman` line for anything still missing:
 
 ```sh
@@ -141,7 +141,7 @@ little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 
-- Arch Linux with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
+- Arch Linux or Fedora with a Wayland compositor (needs `wl_compositor` v4, `wl_shm` and xdg-shell).
 - System libraries, with their development files to build: fontconfig,
   xkbcommon, libwebp (libwebpdemux), librsvg, cairo and glib.
 - The window text uses the Adwaita Sans font if it is installed; fontconfig picks a

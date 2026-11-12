@@ -35,7 +35,7 @@ itself, on the CPU.
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+Prebuilt for Arch Linux and Fedora (x86_64), no root. The installer also adds a menu entry and prints
 one `pacman` line for anything still missing:
 
 ```sh
@@ -204,7 +204,7 @@ little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 
-- Arch Linux (term uses `/proc` and inotify).
+- Arch Linux or Fedora (term uses `/proc` and inotify).
 - System libraries: fontconfig, xkbcommon.
 - A Wayland compositor with `wl_compositor` version 4, `wl_shm` and `xdg_wm_base`.
   Optional: `wl_seat` (keyboard and mouse), `wl_data_device_manager` (clipboard) and

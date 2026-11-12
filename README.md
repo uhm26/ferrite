@@ -4,7 +4,7 @@
 
 <br>
 
-[![Arch Linux](https://img.shields.io/badge/platform-Arch%20Linux-242424?style=flat-square&labelColor=111111)](#requirements)
+[![Arch Linux, Fedora](https://img.shields.io/badge/platform-Arch%20Linux%20%7C%20Fedora-242424?style=flat-square&labelColor=111111)](#requirements)
 [![Wayland](https://img.shields.io/badge/display-Wayland-242424?style=flat-square&labelColor=111111)](#requirements)
 [![Rust](https://img.shields.io/badge/written%20in-Rust-242424?style=flat-square&labelColor=111111)](#build-from-source)
 [![License](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-242424?style=flat-square&labelColor=111111)](#license)
@@ -54,7 +54,8 @@ has the details and how it was measured.
 
 ## Requirements
 
-- Arch Linux (or an Arch-based distro), x86_64, with a Wayland compositor. No other systems.
+- Arch Linux or Fedora (or a distro based on them), x86_64, with a Wayland compositor.
+  No other systems.
 - `wallpaper` and the `screenshot` freeze overlay need wlr-layer-shell; `screenshot` needs
   wlr-screencopy; `clipboard` needs ext- or wlr-data-control. Hyprland, sway and niri have
   them; GNOME does not. Picking a window in `screenshot` uses Hyprland.
@@ -62,7 +63,7 @@ has the details and how it was measured.
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), checked with SHA-256, installed to `~/.local/bin` (no root):
+Prebuilt for Arch Linux and Fedora (x86_64), checked with SHA-256, installed to `~/.local/bin` (no root):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh -s -- term files    # any tools
@@ -70,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh 
 
 Every tool is prebuilt. Run it again to update; `--uninstall` removes a tool (and its menu
 entry), `--help` lists the options. Tools that need system libraries tell you the exact
-packages to install as one `pacman` line.
+packages to install as one `pacman` or `dnf` line.
 
 ## Build from source
 

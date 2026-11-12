@@ -43,7 +43,7 @@ A file manager laid out like Nemo: places on the left, a list or grid of files o
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+Prebuilt for Arch Linux and Fedora (x86_64), no root. The installer also adds a menu entry and prints
 one `pacman` line for anything still missing:
 
 ```sh
@@ -227,7 +227,7 @@ little slower. "Start" is from launch until the window is on screen.
   File System). Mounting internal disks needs a polkit rule, since `files` has no polkit
   agent to ask for a password.
 - xdg-desktop-portal and a D-Bus session bus for the file picker.
-- Arch Linux, x86_64 (the few libc calls use x86_64 glibc struct layouts).
+- Arch Linux or Fedora, x86_64 (the few libc calls use x86_64 glibc struct layouts).
 
 ## Limitations
 

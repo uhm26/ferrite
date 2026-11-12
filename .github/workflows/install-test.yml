@@ -1,5 +1,5 @@
-# Install the newest release of every tool into a clean Arch Linux container, the way a user
-# would: install.sh, then exactly the pacman line it prints, then start every tool.
+# Install the newest release of every tool into a clean Arch Linux and a clean Fedora container,
+# the way a user would: install.sh, then exactly the pacman/dnf line it prints, then start every tool.
 # Run by hand (Actions → install-test → Run workflow) after releases.
 name: install-test
 
@@ -10,8 +10,11 @@ permissions:
   contents: read
 
 jobs:
-  clean-arch:
+  clean:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [archlinux:latest, fedora:latest]
     steps:
       - uses: actions/checkout@v5
       - name: Download the newest release of each tool
@@ -29,21 +32,28 @@ jobs:
             echo "$t ${tag#"$t"-v}" >> versions
           done
           cat versions
-      - name: Install and run in a clean Arch container
+      - name: Install and run in a clean ${{ matrix.image }} container
         run: |
-          docker run --rm -v "$PWD:/ferrite" -w /ferrite archlinux:latest sh -euc '
-            # A bare Arch: no fonts, no ferrite deps. install.sh must ask for all of it.
-            pacman -Sy --noconfirm >/dev/null
+          docker run --rm -v "$PWD:/ferrite" -w /ferrite ${{ matrix.image }} sh -euc '
+            # A bare system: no fonts, no ferrite deps. install.sh must ask for all of it.
+            if command -v dnf >/dev/null; then
+              pkg() { dnf install -y -q "$@" >/dev/null; }; ffmpeg=ffmpeg-free
+              pkg tar gzip  # in every Fedora desktop, maybe not in the slim container image
+            else
+              pacman -Sy --noconfirm >/dev/null
+              pkg() { pacman -S --noconfirm --needed "$@" >/dev/null; }; ffmpeg=ffmpeg
+            fi
             export FERRITE_MIRROR=/ferrite/mirror HOME=/root XDG_DATA_HOME=/root/.local/share
             hints=""
             while read -r t v; do
               out=$(sh install.sh --version "$v" "$t" 2>&1)
               echo "$out"
-              line=$(echo "$out" | grep -o "sudo pacman -S --needed.*" || true)
-              hints="$hints ${line#sudo pacman -S --needed}"
+              line=$(echo "$out" | grep -o "sudo \(pacman -S --needed\|dnf install\).*" || true)
+              line=${line#sudo pacman -S --needed}
+              hints="$hints ${line#sudo dnf install}"
             done < versions
             echo "== installing what install.sh asked for:$hints"
-            [ -z "${hints# }" ] || pacman -S --noconfirm --needed $hints >/dev/null
+            [ -z "${hints# }" ] || pkg $hints
             echo "== nothing may be missing now"
             for t in term files image video screenshot wallpaper clipboard auth; do
               if ldd "/root/.local/bin/$t" | grep "not found"; then echo "$t still misses libraries"; exit 1; fi
@@ -51,7 +61,7 @@ jobs:
             echo "== start every tool"
             b=/root/.local/bin
             "$b/term" --version
-            pacman -S --noconfirm --needed ffmpeg >/dev/null  # demo files only, after the dependency check
+            pkg "$ffmpeg"  # demo files only, after the dependency check
             mkdir -p /tmp/demo/pics
             ffmpeg -loglevel error -f lavfi -i "mandelbrot=s=320x200" -frames:v 1 /tmp/demo/pics/a.png
             ffmpeg -loglevel error -f lavfi -i "testsrc2=s=320x240:r=10" -t 2 -pix_fmt yuv420p /tmp/demo/v.mp4

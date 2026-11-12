@@ -24,7 +24,7 @@ A video player on top of libmpv. Decodes on the GPU when it can.
 
 ## Install
 
-Prebuilt for Arch Linux (x86_64), no root. The installer also adds a menu entry and prints
+Prebuilt for Arch Linux and Fedora (x86_64), no root. The installer also adds a menu entry and prints
 one `pacman` line for anything still missing:
 
 ```sh
@@ -131,7 +131,7 @@ little slower. "Start" is from launch until the window is on screen.
 
 ## Requirements
 
-- Arch Linux with a Wayland compositor that offers `wl_subcompositor` and
+- Arch Linux or Fedora with a Wayland compositor that offers `wl_subcompositor` and
   `zwp_linux_dmabuf_v1` (version 3 or newer), besides `wl_compositor` v4, `wl_shm` and
   xdg-shell. `video` exits with an error if one is missing.
 - A GPU and driver with EGL on GBM and OpenGL 3.3 or newer (Mesa).

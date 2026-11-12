@@ -1,5 +1,5 @@
 #!/bin/sh
-# ferrite installer (Arch Linux + Wayland): downloads prebuilt ferrite tools from GitHub
+# ferrite installer (Arch Linux or Fedora + Wayland): downloads prebuilt ferrite tools from GitHub
 # releases, checks their SHA-256 and puts them in ~/.local/bin. No root needed. Re-run it
 # to update.
 #
@@ -20,7 +20,7 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
     cat <<EOF
-ferrite installer (Arch Linux + Wayland)
+ferrite installer (Arch Linux or Fedora + Wayland)
 
 usage: install.sh [options] TOOL...
 
@@ -49,12 +49,14 @@ fetch() {
     fi
 }
 
-# ferrite supports Arch Linux and distros based on it (ID or ID_LIKE "arch"), x86_64.
+# ferrite supports Arch Linux, Fedora and distros based on them (ID or ID_LIKE), x86_64.
+# Sets $distro (arch or fedora): it picks the package names and the install command.
 check_system() {
     ids=$(grep -E '^(ID|ID_LIKE)=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' | tr '\n' ' ')
     case " $ids " in
-        *" arch "*) ;;
-        *) die "ferrite supports Arch Linux (and Arch-based distros) only" ;;
+        *" arch "*) distro=arch ;;
+        *" fedora "*) distro=fedora ;;
+        *) die "ferrite supports Arch Linux and Fedora (and distros based on them) only" ;;
     esac
     case "$(uname -m)" in
         x86_64) ;;
@@ -112,8 +114,27 @@ install_menu_entry() {
     say "added a menu entry: $data/applications/$1.desktop"
 }
 
-# Arch package of a library or program the tools use.
+# Package of a library or program the tools use, for $distro.
 pkg_of() {
+    if [ "$distro" = fedora ]; then
+        case "$1" in
+            libfreetype.so.6) echo freetype ;;
+            librsvg-2.so.2) echo librsvg2 ;;
+            libglib-2.0.so.0 | libgobject-2.0.so.0) echo glib2 ;;
+            libwebpdemux.so.2) echo libwebp ;;
+            libmpv.so.2) echo mpv-libs ;;
+            libEGL.so.1) echo libglvnd-egl ;;
+            libgbm.so.1) echo mesa-libgbm ;;
+            adwaita-fonts) echo adwaita-sans-fonts adwaita-mono-fonts ;;
+            bsdtar) echo bsdtar ;;
+            *) pkg_of_arch "$1" ;;
+        esac
+    else
+        pkg_of_arch "$1"
+    fi
+}
+
+pkg_of_arch() {
     case "$1" in
         libfontconfig.so.1) echo fontconfig ;;
         libfreetype.so.6) echo freetype2 ;;
@@ -132,7 +153,7 @@ pkg_of() {
     esac
 }
 
-# One pacman line for everything tool $1 still needs: libraries it links (ldd) and
+# One pacman/dnf line for everything tool $1 still needs: libraries it links (ldd) and
 # programs it runs (xdg-open to open files, bsdtar for archives).
 missing_packages() {
     case "$1" in
@@ -150,16 +171,20 @@ missing_packages() {
     esac
     pkgs=""
     for n in $need; do
-        p=$(pkg_of "$n")
-        case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac
+        for p in $(pkg_of "$n"); do
+            case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac
+        done
     done
     [ -n "$pkgs" ] || return 0
-    say "$1 needs a few more packages: sudo pacman -S --needed$pkgs"
+    if [ "$distro" = fedora ]; then cmd="sudo dnf install"; else cmd="sudo pacman -S --needed"; fi
+    say "$1 needs a few more packages: $cmd$pkgs"
 }
 
 notes_for() {
     case "$1" in
-        auth) say "auth is a daemon: start it with your session (e.g. Hyprland: exec-once = auth); only one polkit agent can run" ;;
+        auth)
+            say "auth is a daemon: start it with your session (e.g. Hyprland: exec-once = auth); only one polkit agent can run"
+            [ -S /run/polkit/agent-helper.socket ] || say "auth needs polkit 126+ with its helper socket: sudo systemctl enable --now polkit-agent-helper.socket" ;;
         clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = clipboard; sway: exec clipboard)" ;;
         wallpaper) say "wallpaper: run wallpaper IMAGE once; start a bare wallpaper with your session to restore it" ;;
         screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to your Pictures folder" ;;

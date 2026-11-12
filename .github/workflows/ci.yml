@@ -1,5 +1,5 @@
-# Checks on every push and pull request, in Arch Linux (the one supported system): lints +
-# tests for the whole workspace, and install.sh under dash (strict POSIX) with a fake release.
+# Checks on every push and pull request: lints + tests for the whole workspace in Arch Linux,
+# and install.sh under dash (strict POSIX) with a fake release in Arch and in Fedora.
 name: ci
 
 on:
@@ -34,9 +34,12 @@ jobs:
 
   installer:
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    strategy:
+      matrix:
+        image: [archlinux:latest, fedora:latest]
+    container: ${{ matrix.image }}
     steps:
-      - run: pacman -Syu --noconfirm --needed dash
+      - run: if command -v dnf; then dnf install -y dash tar gzip; else pacman -Syu --noconfirm --needed dash; fi
       - uses: actions/checkout@v5
       - name: Install a fake release under dash
         run: |
