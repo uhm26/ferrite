@@ -55,6 +55,13 @@ jobs:
           test "$("$bin/clipboard")" = fake
           dash install.sh --dir "$bin" --uninstall clipboard
           test ! -e "$bin/clipboard"
+          # Default dir, PATH without it: new bash shells find the tool; a re-run adds no 2nd line.
+          h="$RUNNER_TEMP/home"; mkdir -p "$h"
+          for i in 1 2; do
+            env -i HOME="$h" PATH=/usr/bin FERRITE_MIRROR="$RUNNER_TEMP/mirror" dash install.sh --version 9.9.9 clipboard
+          done
+          test "$(grep -c 'ferrite installer' "$h/.bashrc")" = 1
+          test "$(env -i HOME="$h" PATH=/usr/bin bash -ic clipboard 2>/dev/null)" = fake
           # A broken checksum must stop the install.
           echo "0  $a.tar.gz" > "$m/$a.tar.gz.sha256"
           if FERRITE_MIRROR="$RUNNER_TEMP/mirror" dash install.sh --version 9.9.9 --dir "$bin" clipboard; then

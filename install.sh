@@ -183,9 +183,9 @@ missing_packages() {
 notes_for() {
     case "$1" in
         auth)
-            say "auth is a daemon: start it with your session (e.g. Hyprland: exec-once = auth); only one polkit agent can run"
+            say "auth is a daemon: start it with your session (e.g. Hyprland: exec-once = $dir/auth); only one polkit agent can run"
             [ -S /run/polkit/agent-helper.socket ] || say "auth needs polkit 126+ with its helper socket: sudo systemctl enable --now polkit-agent-helper.socket" ;;
-        clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = clipboard; sway: exec clipboard)" ;;
+        clipboard) say "clipboard is a daemon: start it with your session (e.g. Hyprland: exec-once = $dir/clipboard; sway: exec $dir/clipboard)" ;;
         wallpaper) say "wallpaper: run wallpaper IMAGE once; start a bare wallpaper with your session to restore it" ;;
         screenshot) say "screenshot: bind a key to screenshot -s (freeze + pick); plain screenshot saves to your Pictures folder" ;;
     esac
@@ -233,11 +233,37 @@ main() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT INT TERM
     for t in $tools; do install_one "$t"; done
+    setup_path
+}
 
-    case ":$PATH:" in
-        *":$dir:"*) ;;
-        *) say "note: $dir is not in your PATH; add it in your shell's config" ;;
-    esac
+# Make the tools runnable by name: put ~/.local/bin on PATH in each installed shell's
+# config, once (a marked line). Many distros (Arch among them) leave it out. A custom --dir
+# is the caller's to manage.
+setup_path() {
+    case ":$PATH:" in *":$dir:"*) return 0 ;; esac
+    if [ "$dir" != "$HOME/.local/bin" ]; then
+        say "note: $dir is not in your PATH; add it in your shell's config"
+        return 0
+    fi
+    mark="# added by the ferrite installer"
+    # shellcheck disable=SC2016 # $HOME and $PATH must expand when the shell starts, not now
+    line='export PATH="$HOME/.local/bin:$PATH"'
+    if has bash; then add_line "$HOME/.bashrc" "$line $mark"; fi
+    if has zsh; then add_line "${ZDOTDIR:-$HOME}/.zshrc" "$line $mark"; fi
+    f="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/ferrite-path.fish"
+    if has fish && [ ! -e "$f" ]; then
+        mkdir -p "${f%/*}"
+        printf 'fish_add_path -g ~/.local/bin %s\n' "$mark" > "$f"
+        say "added ~/.local/bin to your PATH in $f"
+    fi
+    say "open a new terminal to run the tools by name (or, in this one: export PATH=\"$dir:\$PATH\")"
+}
+
+# Append line $2 to file $1 unless it is there already.
+add_line() {
+    grep -qxF "$2" "$1" 2>/dev/null && return 0
+    printf '\n%s\n' "$2" >> "$1"
+    say "added ~/.local/bin to your PATH in $1"
 }
 
 main "$@"

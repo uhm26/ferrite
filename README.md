@@ -70,7 +70,8 @@ curl -fsSL https://raw.githubusercontent.com/uhm26/ferrite/main/install.sh | sh 
 ```
 
 Every tool is prebuilt. Run it again to update; `--uninstall` removes a tool (and its menu
-entry), `--help` lists the options. Tools that need system libraries tell you the exact
+entry), `--help` lists the options. If `~/.local/bin` is not on your PATH yet, it adds
+it to your bash, zsh and fish config, so new terminals run the tools by name. Tools that need system libraries tell you the exact
 packages to install as one `pacman` or `dnf` line.
 
 ## Build from source
