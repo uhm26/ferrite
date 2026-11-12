@@ -97,6 +97,8 @@ install_one() {
     cp "$tmp/$asset/$tool" "$dir/.$tool.new"
     chmod 755 "$dir/.$tool.new"
     mv -f "$dir/.$tool.new" "$dir/$tool"
+    # The version, for the updater to compare with the newest release.
+    mkdir -p "$state" && printf '%s\n' "${tag#"$tool"-v}" >"$state/$tool"
     say "installed $tool ${tag#"$tool"-v} to $dir/$tool"
     install_menu_entry "$tool" "$tmp/$asset"
     missing_packages "$tool"
@@ -192,6 +194,7 @@ notes_for() {
 }
 
 uninstall_one() {
+    rm -f "$state/$1"
     if [ -e "$dir/$1" ]; then
         rm -f "$dir/$1"
         say "removed $dir/$1"
@@ -208,6 +211,7 @@ uninstall_one() {
 
 main() {
     dir="${FERRITE_INSTALL_DIR:-$HOME/.local/bin}"
+    state="${XDG_STATE_HOME:-$HOME/.local/state}/ferrite"
     version=""
     remove=0
     tools=""

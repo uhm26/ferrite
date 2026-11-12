@@ -53,8 +53,10 @@ jobs:
           bin="$RUNNER_TEMP/bin"
           FERRITE_MIRROR="$RUNNER_TEMP/mirror" dash install.sh --version 9.9.9 --dir "$bin" clipboard
           test "$("$bin/clipboard")" = fake
+          test "$(cat "$HOME/.local/state/ferrite/clipboard")" = 9.9.9
           dash install.sh --dir "$bin" --uninstall clipboard
           test ! -e "$bin/clipboard"
+          test ! -e "$HOME/.local/state/ferrite/clipboard"
           # Default dir, PATH without it: new bash shells find the tool; a re-run adds no 2nd line.
           h="$RUNNER_TEMP/home"; mkdir -p "$h"
           for i in 1 2; do
